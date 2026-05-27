@@ -830,7 +830,7 @@ class TestExecutor():
             op_category = self.current_config.all_operations.get(operation_type, "UNKNOWN")
             
             if operational_response:
-                GlobalDefs.LOGGING_MODULE.log_operation_response_recv(timestamp, self.my_id, device_instance.mqtt_client_name, sending_client, correlation_data, message.topic, operation_type, op_category, op_message_type, sub_id[0])
+                GlobalDefs.LOGGING_MODULE.log_operation_response_recv(timestamp, self.my_id, device_instance.mqtt_client_name, sending_client, correlation_data, message.topic, operation_type, op_category, op_message_type, sub_id[0], op_id)
             else:    
                 GlobalDefs.LOGGING_MODULE.log_operation_recv(timestamp, self.my_id, device_instance.mqtt_client_name, sending_client, correlation_data, message.topic, operation_type, op_category, op_message_type, sub_id[0])
 

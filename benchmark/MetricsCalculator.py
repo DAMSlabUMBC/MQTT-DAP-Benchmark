@@ -127,6 +127,7 @@ class OperationRespRecvEvent:
     op_category: str
     op_status: str
     corr_data: int
+    op_id: str = "NONE"
 
 
 @dataclass
@@ -417,7 +418,7 @@ class MetricsCalculator:
                         self.op_recv_events.append(event)
                         
                     elif label == OP_RESP_RECV_LABEL:
-                        # RECV_OP_RESP@@timestamp@@benchmark_id@@recv_client@@sending_client@@topic@@sub_id@@op_type@@op_category@@op_status@@corr_data
+                        # RECV_OP_RESP@@timestamp@@benchmark_id@@recv_client@@sending_client@@topic@@sub_id@@op_type@@op_category@@op_status@@corr_data@@op_id
                         event = OperationRespRecvEvent(
                             timestamp=float(parts[1]),
                             benchmark_id=parts[2],
@@ -428,7 +429,8 @@ class MetricsCalculator:
                             op_type=parts[7],
                             op_category=parts[8],
                             op_status=parts[9],
-                            corr_data=int(parts[10])
+                            corr_data=int(parts[10]),
+                            op_id=parts[11] if len(parts) > 11 else "NONE"
                         )
                         self.op_resp_recv_events.append(event)
 
@@ -794,7 +796,7 @@ class MetricsCalculator:
                 continue  # ignore non-terminal Pending/Informed notifications
             resp_by_key.setdefault((resp.recv_client_id, resp.op_type, resp.corr_data), []).append(
                 {'ts': resp.timestamp, 'responder': "Broker",
-                 'op_id': "NONE", 'source': 'broker'})
+                 'op_id': resp.op_id, 'source': 'broker'})
 
         for op_pub in self.op_publish_events:
             if op_pub.op_type == "REGISTER-INFO":

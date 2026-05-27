@@ -187,6 +187,8 @@ class ResultLogger:
         message = f"{OP_RESP_PUBLISH_LABEL}{SEPARATOR}{timestamp}{SEPARATOR}{benchmark_id}{SEPARATOR}{client_id}{SEPARATOR}{topic_name}{SEPARATOR}{purpose}{SEPARATOR}{op_type}{SEPARATOR}{op_category}{SEPARATOR}{corr_data}{SEPARATOR}{op_id_field}"
         self.log_queue.put(message)
         
-    def log_operation_response_recv(self, timestamp, benchmark_id, recv_client_id, sending_client_id, corr_data, topic_name, op_type, op_category, op_status, sub_id):
-        message = f"{OP_RESP_RECV_LABEL}{SEPARATOR}{timestamp}{SEPARATOR}{benchmark_id}{SEPARATOR}{recv_client_id}{SEPARATOR}{sending_client_id}{SEPARATOR}{topic_name}{SEPARATOR}{sub_id}{SEPARATOR}{op_type}{SEPARATOR}{op_category}{SEPARATOR}{op_status}{SEPARATOR}{corr_data}"
+    def log_operation_response_recv(self, timestamp, benchmark_id, recv_client_id, sending_client_id, corr_data, topic_name, op_type, op_category, op_status, sub_id, op_id=None):
+        # op_id (broker tracking id) is appended last (field index 11); "NONE" when the broker omits it
+        op_id_field = op_id if op_id is not None else "NONE"
+        message = f"{OP_RESP_RECV_LABEL}{SEPARATOR}{timestamp}{SEPARATOR}{benchmark_id}{SEPARATOR}{recv_client_id}{SEPARATOR}{sending_client_id}{SEPARATOR}{topic_name}{SEPARATOR}{sub_id}{SEPARATOR}{op_type}{SEPARATOR}{op_category}{SEPARATOR}{op_status}{SEPARATOR}{corr_data}{SEPARATOR}{op_id_field}"
         self.log_queue.put(message)
