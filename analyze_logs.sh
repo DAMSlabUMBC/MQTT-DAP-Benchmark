@@ -6,8 +6,8 @@ set -e
 
 if [ "$#" -lt 1 ]; then
     echo "Usage: $0 <logs_directory> [max_parallel_jobs]"
-    echo "Example: $0 logs/pm2"
-    echo "Example: $0 logs/pm2 8  # Run 8 at once"
+    echo "Example: $0 logs/unified"
+    echo "Example: $0 logs/unified 8  # Run 8 at once"
     exit 1
 fi
 

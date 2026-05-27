@@ -8,7 +8,7 @@ import GlobalDefs
 from LoggingModule import (
     SEPARATOR, PM_METHOD_LABEL, CPU_METRICS_LABEL, MEM_METRICS_LABEL,
     CONNECT_LABEL, DISCONNECT_LABEL, SUBSCRIBE_LABEL, OP_SUBSCRIBE_LABEL, PUBLISH_LABEL,
-    OP_PUBLISH_LABEL, RECV_LABEL, OP_RECV_LABEL, OP_RESP_RECV_LABEL
+    OP_PUBLISH_LABEL, RECV_LABEL, OP_RECV_LABEL, OP_RESP_PUBLISH_LABEL, OP_RESP_RECV_LABEL
 )
 
 @dataclass
@@ -74,7 +74,7 @@ class OperationSubscribeEvent:
 
 @dataclass
 class OperationPublishEvent:
-    """Operational message publication event"""
+    """Operational message publication event (PUBLISH_OP)"""
     timestamp: float
     benchmark_id: str
     client_id: str
@@ -83,6 +83,25 @@ class OperationPublishEvent:
     op_type: str
     op_category: str
     corr_data: int
+    op_id: str = "NONE"  # broker-assigned operation id (PUBLISH_OP field index 9); "NONE" when untracked
+
+
+@dataclass
+class OperationRespPublishEvent:
+    """Operational response publication event (PUBLISH_OP_RESP)
+
+    Emitted by a subscriber when it responds to an operation. Carries the op_id
+    echoed back from the originating request so responses can be joined to requests.
+    """
+    timestamp: float
+    benchmark_id: str
+    client_id: str
+    topic: str
+    purpose: str
+    op_type: str
+    op_category: str
+    corr_data: int
+    op_id: str = "NONE"  # broker-assigned operation id (PUBLISH_OP_RESP field index 9); "NONE" when untracked
 
 
 @dataclass
@@ -169,6 +188,21 @@ class OPCorrectnessMetrics:
 
 
 @dataclass
+class OperationCorrelation:
+    """Per-operation request/response correlation, joined by (publisher, op_type, corr_data).
+
+    One row per PUBLISH_OP request. op_id is the broker-assigned id surfaced from the
+    matched response ("NONE" if the request drew no response that carried one).
+    """
+    op_id: str
+    op_type: str
+    completed: bool = False                              # did any subscriber respond?
+    num_responders: int = 0                              # distinct subscribers that responded
+    first_response_latency_ms: Optional[float] = None    # request -> first response
+    last_response_latency_ms: Optional[float] = None     # request -> last response
+
+
+@dataclass
 class TestMetrics:
     """Test metrics"""
     test_name: str
@@ -177,6 +211,7 @@ class TestMetrics:
     messaging_stats: MessagingStats = field(default_factory=MessagingStats)
     purpose_correctness_per_sub: Dict[str, SubscriberPurposeCorrectness] = field(default_factory=dict)
     op_correctness: List[OPCorrectnessMetrics] = field(default_factory=list)
+    op_correlations: List[OperationCorrelation] = field(default_factory=list)
 
 
 class MetricsCalculator:
@@ -189,6 +224,7 @@ class MetricsCalculator:
     subscribe_events: List[SubscribeEvent]
     op_subscribe_events: List[OperationSubscribeEvent]
     op_publish_events: List[OperationPublishEvent]
+    op_resp_publish_events: List[OperationRespPublishEvent]
     op_recv_events: List[OperationRecvEvent]
     op_resp_recv_events: List[OperationRespRecvEvent]
     
@@ -208,6 +244,7 @@ class MetricsCalculator:
         self.subscribe_events = []
         self.op_subscribe_events = []
         self.op_publish_events = []
+        self.op_resp_publish_events = []
         self.op_recv_events = []
         self.op_resp_recv_events = []
         
@@ -331,7 +368,8 @@ class MetricsCalculator:
                         self.op_subscribe_events.append(event)
 
                     elif label == OP_PUBLISH_LABEL:
-                        # PUBLISH_OP@@timestamp@@benchmark_id@@client_id@@topic@@purpose@@op_type@@op_category@@corr_data
+                        # PUBLISH_OP@@timestamp@@benchmark_id@@client_id@@topic@@purpose@@op_type@@op_category@@corr_data@@op_id
+                        # op_id (field index 9) is optional for backward compatibility with older logs.
                         event = OperationPublishEvent(
                             timestamp=float(parts[1]),
                             benchmark_id=parts[2],
@@ -340,9 +378,26 @@ class MetricsCalculator:
                             purpose=parts[5],
                             op_type=parts[6],
                             op_category=parts[7],
-                            corr_data=int(parts[8])
+                            corr_data=int(parts[8]),
+                            op_id=parts[9] if len(parts) > 9 else "NONE"
                         )
                         self.op_publish_events.append(event)
+
+                    elif label == OP_RESP_PUBLISH_LABEL:
+                        # PUBLISH_OP_RESP@@timestamp@@benchmark_id@@client_id@@topic@@purpose@@op_type@@op_category@@corr_data@@op_id
+                        # op_id (field index 9) is optional for backward compatibility with older logs.
+                        event = OperationRespPublishEvent(
+                            timestamp=float(parts[1]),
+                            benchmark_id=parts[2],
+                            client_id=parts[3],
+                            topic=parts[4],
+                            purpose=parts[5],
+                            op_type=parts[6],
+                            op_category=parts[7],
+                            corr_data=int(parts[8]),
+                            op_id=parts[9] if len(parts) > 9 else "NONE"
+                        )
+                        self.op_resp_publish_events.append(event)
 
                     elif label == OP_RECV_LABEL:
                         # RECV_OP@@timestamp@@benchmark_id@@recv_client@@sending_client@@topic@@sub_id@@op_type@@op_category@@op_status@@corr_data
@@ -700,11 +755,102 @@ class MetricsCalculator:
 
         return results
 
+    def calculate_op_correlation(self) -> List[OperationCorrelation]:
+        """Join PUBLISH_OP requests to PUBLISH_OP_RESP responses by (publisher, op_type, corr_data).
+
+        The broker-assigned op_id is only ever echoed to the *response* side
+        (PUBLISH_OP_RESP); the requesting publisher never receives it, so PUBLISH_OP
+        always carries op_id "NONE" and requests cannot be joined on op_id. Instead we
+        join on the same key calculate_op_correctness uses: the originating publisher,
+        the op type, and the correlation data. A response is published by a *subscriber*,
+        which encodes the originating publisher in its response topic
+        ("<op_resp_prefix>/<publisher_client_id>"), so the publisher is recovered as the
+        final topic segment.
+
+        Produces one row per PUBLISH_OP request (corr_data identifies the request). When a
+        matched response carries a real op_id it is surfaced for traceability. Requests
+        with no matching response are kept with completed=False so the completion rate
+        stays meaningful -- it must be able to flag an op that reached a subscriber but
+        went unanswered, which skipping unanswered requests would hide.
+        """
+        results: List[OperationCorrelation] = []
+
+        # Index responses by (originating_publisher, op_type, corr_data). The response's
+        # own client_id is the responding subscriber; the originating publisher is the
+        # last segment of the response topic.
+        resp_by_key: Dict[tuple, List[OperationRespPublishEvent]] = {}
+        for resp in self.op_resp_publish_events:
+            publisher = resp.topic.rsplit('/', 1)[-1]
+            resp_by_key.setdefault((publisher, resp.op_type, resp.corr_data), []).append(resp)
+
+        for op_pub in self.op_publish_events:
+            responses = resp_by_key.get((op_pub.client_id, op_pub.op_type, op_pub.corr_data), [])
+
+            # Surface the broker-assigned op_id from the response side (requests carry "NONE").
+            op_id = "NONE"
+            for r in responses:
+                if r.op_id != "NONE":
+                    op_id = r.op_id
+                    break
+
+            corr = OperationCorrelation(op_id=op_id, op_type=op_pub.op_type)
+            if responses:
+                corr.completed = True
+                corr.num_responders = len({r.client_id for r in responses})
+                resp_times = sorted(r.timestamp for r in responses)
+                corr.first_response_latency_ms = (resp_times[0] - op_pub.timestamp) * 1000.0
+                corr.last_response_latency_ms = (resp_times[-1] - op_pub.timestamp) * 1000.0
+
+            results.append(corr)
+
+        return results
+
+    @staticmethod
+    def _percentile(sorted_values: List[float], pct: float) -> float:
+        """Linear-interpolation percentile of an already-sorted list. Returns 0.0 if empty."""
+        if not sorted_values:
+            return 0.0
+        if len(sorted_values) == 1:
+            return sorted_values[0]
+        rank = (pct / 100.0) * (len(sorted_values) - 1)
+        low = int(rank)
+        high = min(low + 1, len(sorted_values) - 1)
+        frac = rank - low
+        return sorted_values[low] + (sorted_values[high] - sorted_values[low]) * frac
+
+    def _aggregate_op_correlation(self, correlations: List[OperationCorrelation]) -> Dict[str, Dict[str, float]]:
+        """Aggregate per-operation correlation rows by op_type.
+
+        Reports, per op_type: total operations issued, completion rate, and the
+        median/p90/p99 of the request->first-response latency (over completed ops only).
+        """
+        by_type: Dict[str, List[OperationCorrelation]] = {}
+        for c in correlations:
+            by_type.setdefault(c.op_type, []).append(c)
+
+        agg: Dict[str, Dict[str, float]] = {}
+        for op_type, items in by_type.items():
+            total = len(items)
+            completed = sum(1 for c in items if c.completed)
+            latencies = sorted(
+                c.first_response_latency_ms for c in items
+                if c.first_response_latency_ms is not None
+            )
+            agg[op_type] = {
+                'total': float(total),
+                'completed': float(completed),
+                'completion_rate': (completed / total) if total else 0.0,
+                'median_latency_ms': self._percentile(latencies, 50),
+                'p90_latency_ms': self._percentile(latencies, 90),
+                'p99_latency_ms': self._percentile(latencies, 99),
+            }
+        return agg
+
     def calculate_all_metrics(self, log_file_path: str, test_name: str = "test") -> Optional[TestMetrics]:
         """Calculate all metrics"""
         if not self.parse_log_file(log_file_path):
             return None
-        
+
         # Need to determine the ranges for which clients were subscribed to topics for purposes to
         # make sure we don't count a miss for a subscriber that wasn't active
         self._parse_subscription_periods()
@@ -718,6 +864,7 @@ class MetricsCalculator:
         metrics.messaging_stats = self.calculate_messaging_stats()
         metrics.purpose_correctness_per_sub = self.calculate_purpose_correctness()
         metrics.op_correctness = self.calculate_op_correctness()
+        metrics.op_correlations = self.calculate_op_correlation()
 
         return metrics
 
@@ -799,6 +946,27 @@ class MetricsCalculator:
 
             # Show the breakdown by category (C1_REG, C2, C3) to see what's going on
             #self._print_op_by_category(metrics)
+
+        # OP Correlation Summary (request<->response joined by op_id)
+        print(f"\n--- OP Correlation Summary (by op_id) ---")
+        if metrics.op_correlations:
+            total_ops = len(metrics.op_correlations)
+            total_completed = sum(1 for c in metrics.op_correlations if c.completed)
+            overall_rate = (total_completed / total_ops) if total_ops else 0.0
+            print(f"Total Tracked Operations:   {total_ops}")
+            print(f"Total Completed Operations: {total_completed}")
+            print(f"Overall Completion Rate:    {overall_rate:.4f} ({overall_rate*100:.5f}%)")
+
+            op_agg = self._aggregate_op_correlation(metrics.op_correlations)
+            for op_type in sorted(op_agg.keys()):
+                a = op_agg[op_type]
+                print(f"  {op_type}: issued={int(a['total'])} "
+                      f"completion={a['completion_rate']:.4f} "
+                      f"median={a['median_latency_ms']:.3f}ms "
+                      f"p90={a['p90_latency_ms']:.3f}ms "
+                      f"p99={a['p99_latency_ms']:.3f}ms")
+        else:
+            print("No tracked operations (all op_ids were NONE — broker did not assign op_ids)")
 
         print(f"\n{'='*80}\n")
 
@@ -967,3 +1135,58 @@ class MetricsCalculator:
 
                 # Add the category breakdown (C1_REG, C2, C3) to the CSV too
                 # self._export_op_by_category_to_csv(writer, metrics)
+
+            # OP Correlation aggregates (by op_type). Additive rows in the existing
+            # 3-column schema; independent of op_correctness above, so present even
+            # when that is empty (e.g. vanilla-broker runs with all op_ids "NONE").
+            op_agg = self._aggregate_op_correlation(metrics.op_correlations)
+            total_ops = len(metrics.op_correlations)
+            total_completed = sum(1 for c in metrics.op_correlations if c.completed)
+            writer.writerow(["OP Correlation", "Total Tracked Operations", f"{total_ops}"])
+            writer.writerow(["OP Correlation", "Total Completed Operations", f"{total_completed}"])
+            writer.writerow(["OP Correlation", "Overall Completion Rate",
+                             f"{(total_completed / total_ops) if total_ops else 0.0:.4f}"])
+            for op_type in sorted(op_agg.keys()):
+                a = op_agg[op_type]
+                writer.writerow(["OP Correlation", f"{op_type} Operations Issued", f"{int(a['total'])}"])
+                writer.writerow(["OP Correlation", f"{op_type} Completion Rate", f"{a['completion_rate']:.4f}"])
+                writer.writerow(["OP Correlation", f"{op_type} Median Latency (ms)", f"{a['median_latency_ms']:.5f}"])
+                writer.writerow(["OP Correlation", f"{op_type} p90 Latency (ms)", f"{a['p90_latency_ms']:.5f}"])
+                writer.writerow(["OP Correlation", f"{op_type} p99 Latency (ms)", f"{a['p99_latency_ms']:.5f}"])
+
+        # Per-operation correlation rows live in a separate file (different column
+        # schema), so the main CSV's 3-column schema is never altered.
+        self.export_op_correlation_to_csv(metrics, output_path)
+
+    def export_op_correlation_to_csv(self, metrics: TestMetrics, main_output_path: str):
+        """Export per-operation request/response correlation to a sibling CSV file.
+
+        The file is named '<main_stem>_op_correlation.csv' next to the main metrics
+        CSV. Columns: op_id, op_type, completed, num_responders,
+        first_response_latency_ms, last_response_latency_ms. Latency cells are blank
+        for operations that received no response.
+        """
+        import csv
+
+        p = Path(main_output_path)
+        corr_path = p.with_name(f"{p.stem}_op_correlation{p.suffix or '.csv'}")
+
+        with open(corr_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "op_id", "op_type", "completed", "num_responders",
+                "first_response_latency_ms", "last_response_latency_ms"
+            ])
+            for c in metrics.op_correlations:
+                first = f"{c.first_response_latency_ms:.5f}" if c.first_response_latency_ms is not None else ""
+                last = f"{c.last_response_latency_ms:.5f}" if c.last_response_latency_ms is not None else ""
+                writer.writerow([
+                    c.op_id,
+                    c.op_type,
+                    "yes" if c.completed else "no",
+                    c.num_responders,
+                    first,
+                    last,
+                ])
+
+        print(f"Per-operation correlation exported to: {corr_path}")

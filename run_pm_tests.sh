@@ -1,24 +1,16 @@
 #!/bin/bash
-# Runs all tests for one PM method (baseline, pm1, pm2, pm3, or pm4)
-# Just pass the PM method as an arg and it figures out the rest
+# Runs the full unified-DAP-method test suite against the DAP broker.
+# Collapsed from the old per-method script: there is now a single unified target,
+# so this takes no PM-method argument.
 
 set -e
 
-PM_METHOD="$1"
-
-if [ -z "$PM_METHOD" ]; then
-    echo "Usage: $0 <pm_method>"
-    echo "Example: $0 baseline"
-    echo "Example: $0 pm2"
-    exit 1
-fi
-
 CONFIG_DIR="test-configs"
-DOCKER_COMPOSE_FILE="docker-compose-${PM_METHOD}.yml"
-BROKER_CONTAINER="benchmark-mosquitto-${PM_METHOD}"
-RUNNER_CONTAINER="benchmark-runner-${PM_METHOD}"
-RESULTS_DIR="results/${PM_METHOD}"
-LOGS_DIR="logs/${PM_METHOD}"
+DOCKER_COMPOSE_FILE="docker-compose-unified.yml"
+BROKER_CONTAINER="benchmark-mosquitto-unified"
+RUNNER_CONTAINER="benchmark-runner-unified"
+RESULTS_DIR="results/unified"
+LOGS_DIR="logs/unified"
 
 # Some colors to make output easier to read
 RED='\033[0;31m'
@@ -26,16 +18,8 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-PM_NAMES=(
-    ["baseline"]="Baseline (No PM)"
-    ["pm1"]="PM1 (Purpose-Encoding Topics)"
-    ["pm2"]="PM2 (Per-Message Declaration)"
-    ["pm3"]="PM3 (Registration by Message)"
-    ["pm4"]="PM4 (Registration by Topic)"
-)
-
 echo "================================================================================"
-echo "${PM_NAMES[$PM_METHOD]:-$PM_METHOD} TESTS"
+echo "UNIFIED DAP METHOD TESTS"
 echo "================================================================================"
 echo "Start time: $(date)"
 echo ""
@@ -44,37 +28,24 @@ echo ""
 mkdir -p "$RESULTS_DIR" "$LOGS_DIR"
 
 # Fire up the containers
-echo "Starting ${PM_METHOD} broker and runner..."
+echo "Starting unified broker and runner..."
 docker compose -f "$DOCKER_COMPOSE_FILE" up -d
 
 # Give the broker a sec to get ready
 echo "Waiting for broker to initialize..."
 sleep 10
 
-# Go find all the test configs for this PM method
-if [ "$PM_METHOD" = "baseline" ]; then
-    CONFIG_FILES=$(find $CONFIG_DIR -name "*baseline*.cfg" -o -name "*pm0*.cfg" 2>/dev/null | sort)
-else
-    CONFIG_FILES=$(find $CONFIG_DIR -name "*${PM_METHOD}*.cfg" 2>/dev/null | sort)
-fi
+# Go find all the unified test configs
+CONFIG_FILES=$(find $CONFIG_DIR -name "*_unified.cfg" 2>/dev/null | sort)
 
 if [ -z "$CONFIG_FILES" ]; then
-    echo "${YELLOW}No ${PM_METHOD} test configs found. Checking for PM method in files...${NC}"
-    # Try to find configs by looking inside the files for the PM method number
-    PM_NUM=$(echo "$PM_METHOD" | grep -o '[0-9]' | head -1)
-    if [ -n "$PM_NUM" ]; then
-        CONFIG_FILES=$(grep -l "purpose_management_method: ${PM_NUM}" $CONFIG_DIR/*.cfg 2>/dev/null | sort)
-    fi
-fi
-
-if [ -z "$CONFIG_FILES" ]; then
-    echo "${RED}ERROR: No ${PM_METHOD} test configs found${NC}"
+    echo "${RED}ERROR: No unified test configs (*_unified.cfg) found in ${CONFIG_DIR}${NC}"
     docker compose -f "$DOCKER_COMPOSE_FILE" down
     exit 1
 fi
 
 TOTAL_TESTS=$(echo "$CONFIG_FILES" | wc -l | tr -d ' ')
-echo "Found $TOTAL_TESTS ${PM_METHOD} test(s)"
+echo "Found $TOTAL_TESTS unified test(s)"
 echo "================================================================================"
 echo ""
 
@@ -116,7 +87,7 @@ done
 # Print out the summary
 echo ""
 echo "================================================================================"
-echo "${PM_METHOD} TESTS COMPLETE"
+echo "UNIFIED TESTS COMPLETE"
 echo "================================================================================"
 echo "End time: $(date)"
 echo ""

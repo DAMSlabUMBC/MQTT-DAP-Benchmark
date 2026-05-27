@@ -29,7 +29,7 @@ class TestExecutor():
     stop_event: threading.Event
     duration_scheduler: sched.scheduler
     
-    pending_publishes: Dict[str, Dict[int, Tuple[str, str, str, float]]] # client name => [message id => (topic, purpose, message_type, timestamp)]
+    pending_publishes: Dict[str, Dict[int, Tuple[str, str, str, float, str | None, bool]]] # client name => [message id => (topic, purpose, message_type, timestamp, op_id, is_response)]
     pending_subscribes: Dict[str, Dict[int, Tuple[str, str, int, float]]] # client name => [message id => (topic_filter, purpose_filter, sub_id, timestamp)]
     sub_ids: Dict[str, Dict[str, int]]
     publish_lock: threading.Lock
@@ -300,11 +300,7 @@ class TestExecutor():
             
     def _register_subscribers_c1_operation_data(self, subscriber: DeviceInstance) -> None:
         
-        # This isn't used unless we're using an enhanced broker
-        if self.method is GlobalDefs.PurposeManagementMethod.PM_0 or self.method is GlobalDefs.PurposeManagementMethod.PM_1:
-            return
-        
-        # Register subscriber for all c1 ops
+        # Register the subscriber for all C1 ops (the unified broker supports this directly)
         for c1_op in self.c1_reg_ops:
             
             message_counter = subscriber.message_count
@@ -338,16 +334,19 @@ class TestExecutor():
             self.next_op_time_ms = elapsed_ms + self.current_config.op_send_rate
             
 
-    def _send_operational_response(self, subscriber: DeviceInstance, response_topic: str, operation_type: str, correlation_data: int):
+    def _send_operational_response(self, subscriber: DeviceInstance, response_topic: str, operation_type: str, correlation_data: int, op_id: str | None = None):
         """Have a subscriber send a response to an operational request
 
         This gets called when a subscriber receives an operational request (e.g., Access, Portability)
         from a subscriber and needs to respond with the requested data.
+
+        op_id is the broker's tracking id echoed back verbatim (may be "0" or None for ops the
+        broker doesn't track); it is forwarded as-is so the broker can match the notification.
         """
         if not isinstance(subscriber.device_definition, SubscriberDefinition):
             return
-            
-        results = GlobalDefs.CLIENT_MODULE.publish_operation_response(subscriber.mqtt_client, self.method, response_topic, operation_type, "Success", correlation_data, self.current_config.qos)
+
+        results = GlobalDefs.CLIENT_MODULE.publish_operation_response(subscriber.mqtt_client, self.method, response_topic, operation_type, "Success", correlation_data, self.current_config.qos, op_id=op_id)
 
         # Track this response in pending publishes for logging
         self.publish_lock.acquire()
@@ -357,13 +356,9 @@ class TestExecutor():
             if subscriber.mqtt_client_name not in self.pending_publishes:
                 self.pending_publishes[subscriber.mqtt_client_name] = {}
 
-            # Handle PM_1 topic encoding
-            if self.method == GlobalDefs.PurposeManagementMethod.PM_1:
-                purpose_start_index = topic.rfind('[')
-                topic = topic[:purpose_start_index - 1]
-
+            # is_response=True routes this through PUBLISH_OP_RESP logging; op_id is echoed verbatim.
             self.pending_publishes[subscriber.mqtt_client_name][message_info.mid] = (
-                topic, GlobalDefs.OP_PURPOSE, operation_type, now
+                topic, GlobalDefs.OP_PURPOSE, operation_type, now, op_id, True
             )
 
             # Save message counter for correlations
@@ -394,13 +389,10 @@ class TestExecutor():
             if publisher.mqtt_client_name not in self.pending_publishes:
                 self.pending_publishes[publisher.mqtt_client_name] = {}
 
-            # Handle PM_1 topic encoding
-            if self.method == GlobalDefs.PurposeManagementMethod.PM_1:
-                purpose_start_index = topic.rfind('[')
-                topic = topic[:purpose_start_index - 1]
-
+            # Op request from the publisher side: the broker hasn't assigned an op_id yet (and the
+            # publisher never sees it back in the current flow), so op_id is None -> logged as NONE.
             self.pending_publishes[publisher.mqtt_client_name][message_info.mid] = (
-                topic, GlobalDefs.OP_PURPOSE, operation, now
+                topic, GlobalDefs.OP_PURPOSE, operation, now, None, False
             )
 
             # Save message counter for correlations
@@ -445,13 +437,8 @@ class TestExecutor():
             if device_instance.mqtt_client_name not in self.pending_publishes:
                 self.pending_publishes[device_instance.mqtt_client_name] = {}
 
-            # Handle PM_1 topic encoding
-            if self.method == GlobalDefs.PurposeManagementMethod.PM_1:
-                purpose_start_index = topic.rfind('[')
-                topic = topic[:purpose_start_index - 1]
-
             self.pending_publishes[device_instance.mqtt_client_name][message_info.mid] = (
-                topic, device_instance.current_purpose_filter, "DATA", now
+                topic, device_instance.current_purpose_filter, "DATA", now, None, False
             )
             
             # Save message counter for correlations
@@ -678,15 +665,6 @@ class TestExecutor():
                     device_def.topic_filter, device.current_purpose_filter, sub_id, now
                 )
                 device.subscribed_topics[device_def.topic_filter] = device.current_purpose_filter
-                
-        # For existing subscriptions using method 4, we won't get a subscription response since we don't send a new subscription
-        # We need to record updated filter and log manually here
-        if existing_subscription and self.method == GlobalDefs.PurposeManagementMethod.PM_4:
-            device.subscribed_topics[device_def.topic_filter] = device.current_purpose_filter
-            sub_id = "UNKNOWN"
-            if device.mqtt_client_name in self.sub_ids and device_def.topic_filter in self.sub_ids[device.mqtt_client_name]:
-                sub_id = self.sub_ids[device.mqtt_client_name][device_def.topic_filter]
-            GlobalDefs.LOGGING_MODULE.log_subscribe(time.time(), self.my_id, device.mqtt_client_name, device_def.topic_filter, device.current_purpose_filter, sub_id)
 
         self.subscribe_lock.release()
 
@@ -774,11 +752,11 @@ class TestExecutor():
                     
                 # If successful
                 if reason_code == 0:
-                    topic, purpose, op_type, time = self.pending_publishes[device_instance.mqtt_client_name][mid]
-                    
+                    topic, purpose, op_type, time, op_id, is_response = self.pending_publishes[device_instance.mqtt_client_name][mid]
+
                     # Do not log communications to the broker
                     # if not topic[0] == '$':
-                    
+
                     # Check if operational or data
                     if op_type == "DATA":
                         # Log message
@@ -786,7 +764,12 @@ class TestExecutor():
                     else:
                         # Log operational message - use self.all_operations which includes C1_REG ops
                         op_category = self.all_operations.get(op_type, "UNKNOWN")
-                        GlobalDefs.LOGGING_MODULE.log_operation_publish(time, self.my_id, device_instance.mqtt_client_name, corr_data, topic, purpose, op_type, op_category)
+                        if is_response:
+                            # Subscriber's response to an op request -> PUBLISH_OP_RESP, carrying the echoed op_id
+                            GlobalDefs.LOGGING_MODULE.log_operation_response_publish(time, self.my_id, device_instance.mqtt_client_name, corr_data, topic, purpose, op_type, op_category, op_id)
+                        else:
+                            # Original op request -> PUBLISH_OP (op_id is None until a DAP broker assigns one)
+                            GlobalDefs.LOGGING_MODULE.log_operation_publish(time, self.my_id, device_instance.mqtt_client_name, corr_data, topic, purpose, op_type, op_category, op_id)
                 
                 
     def _on_message_recv(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage):
@@ -799,6 +782,7 @@ class TestExecutor():
         sending_client = "UNKNOWN"
         op_message_type = "OP"
         correlation_data = -1
+        op_id: str | None = None
         sub_id: List[int] = list()
         device_instance: DeviceInstance = userdata
         
@@ -806,7 +790,7 @@ class TestExecutor():
         if message.properties is not None:
             if hasattr(message.properties, "UserProperty"):
                 for name, value in message.properties.UserProperty:
-                    if name == GlobalDefs.PROPERTY_OPERATION:
+                    if name == GlobalDefs.PROPERTY_OPTYPE:
                         operational_message = True
                         operation_type = value
                     elif name == GlobalDefs.PROPERTY_ID:
@@ -814,6 +798,8 @@ class TestExecutor():
                     elif name == GlobalDefs.PROPERTY_OP_STATUS:
                         operational_response = True
                         op_message_type = value
+                    elif name == GlobalDefs.PROPERTY_OP_ID:
+                        op_id = value  # raw decimal string from the broker; echo back verbatim
                         
             if hasattr(message.properties, "CorrelationData"):
                 correlation_data = int.from_bytes(message.properties.CorrelationData, byteorder='big', signed=False)
@@ -834,6 +820,6 @@ class TestExecutor():
 
                 # Send respones to all received requests assuming we're a subscriber
                 if isinstance(device_instance.device_definition, SubscriberDefinition) and hasattr(message.properties, "ResponseTopic") and message.properties.ResponseTopic:
-                    self._send_operational_response(device_instance, message.properties.ResponseTopic, operation_type, correlation_data)
+                    self._send_operational_response(device_instance, message.properties.ResponseTopic, operation_type, correlation_data, op_id)
         else:
             GlobalDefs.LOGGING_MODULE.log_recv(timestamp, self.my_id, device_instance.mqtt_client_name, sending_client, correlation_data, message.topic, "DATA", sub_id[0])

@@ -101,33 +101,24 @@ class ConfigParser():
         if not "purpose_management_method" in data:
             raise Exception("purpose_management_method not found in config")
         
+        # Collapsed to a single unified DAP method. The legacy `purpose_management_method`
+        # value 3 (the former PM_3 this method is based on) is still accepted so existing
+        # configs keep parsing; Step 4 will revisit the config schema.
         method_int = data["purpose_management_method"]
-        if method_int == 0:
-            self.the_config.method = PurposeManagementMethod.PM_0
-        elif method_int == 1:
-            self.the_config.method = PurposeManagementMethod.PM_1
-        elif method_int == 2:
-            self.the_config.method = PurposeManagementMethod.PM_2
-        elif method_int == 3:
-            self.the_config.method = PurposeManagementMethod.PM_3
-            
-            if not "reg_by_msg_reg_topic" in data:
-                raise Exception("reg_by_msg_reg_topic not found in config with purpose management method 3")
-            self.the_config.reg_by_msg_reg_topic = data["reg_by_msg_reg_topic"]
-            
-        elif method_int == 4:
-            self.the_config.method = PurposeManagementMethod.PM_4
-            
-            if not "reg_by_topic_pub_reg_topic" in data:
-                raise Exception("reg_by_topic_pub_reg_topic not found in config with purpose management method 4")
-            self.the_config.reg_by_topic_pub_reg_topic = data["reg_by_topic_pub_reg_topic"]
-            
-            if not "reg_by_topic_sub_reg_topic" in data:
-                raise Exception("reg_by_topic_sub_reg_topic not found in config with purpose management method 4")
-            self.the_config.reg_by_topic_sub_reg_topic = data["reg_by_topic_sub_reg_topic"]
-            
-        else:
-            raise Exception("unknown purpose_management_method found in config")
+        if method_int != 3:
+            raise Exception("Only the unified DAP method is supported (purpose_management_method: 3)")
+        self.the_config.method = PurposeManagementMethod.PM_UNIFIED
+
+        # The unified method registers message purposes by publishing to reg_by_msg_reg_topic
+        # ($DAP/purpose_management) with the MP carried in the DAP-MP user property as "<MP>:<topic>".
+        if not "reg_by_msg_reg_topic" in data:
+            raise Exception("reg_by_msg_reg_topic not found in config (required for the unified method's MP registration)")
+        self.the_config.reg_by_msg_reg_topic = data["reg_by_msg_reg_topic"]
+
+        # The unified method registers message purposes via $DAP/MP_reg/<topic>
+        if not "reg_by_topic_pub_reg_topic" in data:
+            raise Exception("reg_by_topic_pub_reg_topic not found in config (required for the unified method's MP registration)")
+        self.the_config.reg_by_topic_pub_reg_topic = data["reg_by_topic_pub_reg_topic"]
 
          # Parse the opertional config
         if not "or_topic_name" in data:
