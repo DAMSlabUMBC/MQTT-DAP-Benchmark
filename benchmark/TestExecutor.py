@@ -303,10 +303,27 @@ class TestExecutor():
         # Register the subscriber for all C1 ops (the unified broker supports this directly)
         for c1_op in self.c1_reg_ops:
             
+            self.publish_lock.acquire()
+
             message_counter = subscriber.message_count
             subscriber.message_count += 1
-            
-            GlobalDefs.CLIENT_MODULE.publish_operation_request(subscriber.mqtt_client, self.method, c1_op, message_counter, self.current_config.qos)
+
+            results = GlobalDefs.CLIENT_MODULE.publish_operation_request(subscriber.mqtt_client, self.method, c1_op, message_counter, self.current_config.qos)
+
+            now = time.time()
+
+            for message_info, topic in results:
+                if subscriber.mqtt_client_name not in self.pending_publishes:
+                    self.pending_publishes[subscriber.mqtt_client_name] = {}
+
+                # C1 registration request -> PUBLISH_OP, no broker op_id
+                self.pending_publishes[subscriber.mqtt_client_name][message_info.mid] = (
+                    topic, GlobalDefs.OP_PURPOSE, c1_op, now, None, False
+                )
+
+                subscriber.message_id_to_send_counter[message_info.mid] = message_counter
+
+            self.publish_lock.release()
             
 
     def _send_operational_requests_if_ready(self, elapsed_ms: float):

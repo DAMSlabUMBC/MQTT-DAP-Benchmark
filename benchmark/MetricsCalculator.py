@@ -195,6 +195,16 @@ class OperationCorrelation:
 
 
 @dataclass
+class O1InformedMetrics:
+    """Right-to-be-Informed (O1): broker auto-fulfils on first data receipt, so it is
+    measured separately from the correlated ops rather than joined to its requests"""
+    register_info_requests: int = 0
+    informed_notifications: int = 0
+    expected_pairs: int = 0
+    completion_rate: float = 0.0
+
+
+@dataclass
 class TestMetrics:
     """Test metrics"""
     test_name: str
@@ -204,6 +214,7 @@ class TestMetrics:
     purpose_correctness_per_sub: Dict[str, SubscriberPurposeCorrectness] = field(default_factory=dict)
     op_correctness: List[OPCorrectnessMetrics] = field(default_factory=list)
     op_correlations: List[OperationCorrelation] = field(default_factory=list)
+    o1_informed: O1InformedMetrics = field(default_factory=O1InformedMetrics)
 
 
 class MetricsCalculator:
@@ -545,36 +556,57 @@ class MetricsCalculator:
         """Calculate purpose correctness per subscriber"""
         results: Dict[str, SubscriberPurposeCorrectness] = {}
 
+        # Index publishes by (client_id, corr_data) and group recvs by subscriber so the
+        # per-message work below is O(1) lookups instead of rescanning every publish
+        pub_by_key: Dict[Tuple[str, int], PublishEvent] = {}
+        for pub in self.publish_events:
+            pub_by_key.setdefault((pub.client_id, pub.corr_data), pub)
+
+        recvs_by_subscriber: Dict[str, List] = {}
+        for recv in self.recv_events:
+            recvs_by_subscriber.setdefault(recv.recv_client_id, []).append(recv)
+
+        # Cache the matcher results; publishes share topics and purposes
+        topic_match_cache: Dict[Tuple[str, str], bool] = {}
+        def topic_matched_cached(topic_filter: str, topic: str) -> bool:
+            key = (topic_filter, topic)
+            if key not in topic_match_cache:
+                topic_match_cache[key] = topic_matches_sub(topic_filter, topic)
+            return topic_match_cache[key]
+
+        purpose_match_cache: Dict[Tuple[str, str], bool] = {}
+        def purpose_matched_cached(purpose: str, purpose_filter: str) -> bool:
+            key = (purpose, purpose_filter)
+            if key not in purpose_match_cache:
+                purpose_match_cache[key] = GlobalDefs.purpose_described_by_filter(purpose, purpose_filter)
+            return purpose_match_cache[key]
+
         # For each subscriber, check if received messages match their purpose filter
         for subscriber_id, subscriptions in self.subscriber_subscriptions.items():
             metrics = SubscriberPurposeCorrectness(subscriber_id=subscriber_id)
 
             # Get all messages received by this subscriber
-            subscriber_recvs = [
-                recv for recv in self.recv_events
-                if recv.recv_client_id == subscriber_id
-            ]
+            subscriber_recvs = recvs_by_subscriber.get(subscriber_id, [])
 
             metrics.total_recv_count = len(subscriber_recvs)
+
+            # Group this subscriber's recvs by their source publish for the expected-count pass
+            recvs_by_pub_key: Dict[Tuple[str, int], List] = {}
+            for recv in subscriber_recvs:
+                recvs_by_pub_key.setdefault((recv.sending_client_id, recv.corr_data), []).append(recv)
 
             # For each received message, check if purpose matches any subscription
             for recv_event in subscriber_recvs:
                 # Find the corresponding publish event to get the purpose
-                matching_pubs = [
-                    pub for pub in self.publish_events
-                    if pub.client_id == recv_event.sending_client_id
-                    and pub.corr_data == recv_event.corr_data
-                ]
+                pub_event = pub_by_key.get((recv_event.sending_client_id, recv_event.corr_data))
 
-                if not matching_pubs:
+                if pub_event is None:
                     continue
-
-                pub_event = matching_pubs[0]
 
                 # Check if this message's purpose matches any of the subscriber's filters during the subscription time
                 for sub in subscriptions:
-                    topic_matched = topic_matches_sub(sub.topic_filter, pub_event.topic)
-                    purpose_matched = GlobalDefs.purpose_described_by_filter(pub_event.purpose, sub.purpose_filter)
+                    topic_matched = topic_matched_cached(sub.topic_filter, pub_event.topic)
+                    purpose_matched = purpose_matched_cached(pub_event.purpose, sub.purpose_filter)
                     time_valid = (recv_event.timestamp >= sub.timestamp and (sub.end_timestamp is None or recv_event.timestamp <= sub.end_timestamp))
                     
                     if topic_matched and purpose_matched and time_valid:
@@ -586,19 +618,13 @@ class MetricsCalculator:
             # For this, we need to check all messages sent, and see if there was a valid subscription
             # during this time. This is similar to above, but we care about pub events not recv events
             for pub_event in self.publish_events:
-                
-                # Get recv events that match this pub for later
-                recv_events_for_pub = [e for e in subscriber_recvs 
-                                        if e.corr_data == pub_event.corr_data
-                                        and e.sending_client_id == pub_event.client_id
-                                        and e.topic.startswith(pub_event.topic)]
-                
+
                 # Check if we have a subscription for this message with compatible purposes and the relevant time
                 matched_subs = 0
                 for sub in subscriptions:
                     
-                    topic_matched = topic_matches_sub(sub.topic_filter, pub_event.topic)
-                    purpose_matched = GlobalDefs.purpose_described_by_filter(pub_event.purpose, sub.purpose_filter)
+                    topic_matched = topic_matched_cached(sub.topic_filter, pub_event.topic)
+                    purpose_matched = purpose_matched_cached(pub_event.purpose, sub.purpose_filter)
                     time_valid = (pub_event.timestamp >= sub.timestamp and (sub.end_timestamp is None or pub_event.timestamp <= sub.end_timestamp))
                     
                     if topic_matched and purpose_matched and time_valid:
@@ -607,7 +633,8 @@ class MetricsCalculator:
                         
                 if matched_subs > 0:
                     metrics.expected_msg_count += matched_subs
-                    actual_received = len(recv_events_for_pub)    
+                    candidate_recvs = recvs_by_pub_key.get((pub_event.client_id, pub_event.corr_data), [])
+                    actual_received = sum(1 for e in candidate_recvs if e.topic.startswith(pub_event.topic))
                     
                     if actual_received < matched_subs:
                         metrics.bad_reject += (matched_subs - actual_received)               
@@ -634,6 +661,8 @@ class MetricsCalculator:
         # Group operation requests by correlation data (request ID)
         request_pubs: Dict[int, OperationPublishEvent] = {}
         for op_pub in self.op_publish_events:
+            if op_pub.op_type == "REGISTER-INFO":
+                continue  # O1 is measured separately in calculate_o1_informed
             request_pubs[op_pub.corr_data] = op_pub
             
             metrics = OPCorrectnessMetrics()
@@ -768,6 +797,8 @@ class MetricsCalculator:
                  'op_id': "NONE", 'source': 'broker'})
 
         for op_pub in self.op_publish_events:
+            if op_pub.op_type == "REGISTER-INFO":
+                continue  # O1 is measured separately in calculate_o1_informed
             responses = resp_by_key.get((op_pub.client_id, op_pub.op_type, op_pub.corr_data), [])
 
             # Prefer subscriber responses over broker ones for the same request
@@ -829,6 +860,19 @@ class MetricsCalculator:
             }
         return agg
 
+    def calculate_o1_informed(self) -> O1InformedMetrics:
+        """O1 (REGISTER-INFO / Informed) is auto-fulfilled by the broker on first data
+        receipt (paper 7.1), so it is measured as Informed notifications received against
+        one expected per publisher-subscriber data-flow pair, not by a request join"""
+        m = O1InformedMetrics()
+        m.register_info_requests = sum(1 for e in self.op_publish_events if e.op_type == "REGISTER-INFO")
+        m.informed_notifications = sum(1 for e in self.op_resp_recv_events if e.op_type == "Informed")
+        pairs = {(e.sending_client_id, e.recv_client_id) for e in self.recv_events}
+        m.expected_pairs = len(pairs)
+        if m.expected_pairs > 0:
+            m.completion_rate = m.informed_notifications / m.expected_pairs
+        return m
+
     def calculate_all_metrics(self, log_file_path: str, test_name: str = "test") -> Optional[TestMetrics]:
         """Calculate all metrics"""
         if not self.parse_log_file(log_file_path):
@@ -848,6 +892,7 @@ class MetricsCalculator:
         metrics.purpose_correctness_per_sub = self.calculate_purpose_correctness()
         metrics.op_correctness = self.calculate_op_correctness()
         metrics.op_correlations = self.calculate_op_correlation()
+        metrics.o1_informed = self.calculate_o1_informed()
 
         return metrics
 
@@ -950,6 +995,14 @@ class MetricsCalculator:
                       f"p99={a['p99_latency_ms']:.3f}ms")
         else:
             print("No operational requests")
+
+        # O1 (Right to be Informed) is broker-auto-fulfilled; reported separately
+        o1 = metrics.o1_informed
+        print(f"\n--- O1 (REGISTER-INFO / Informed) Summary ---")
+        print(f"REGISTER-INFO Requests Issued:   {o1.register_info_requests}")
+        print(f"Informed Notifications Received: {o1.informed_notifications}")
+        print(f"Expected (pub-sub data pairs):   {o1.expected_pairs}")
+        print(f"Informed Completion Rate:        {o1.completion_rate:.4f} ({o1.completion_rate*100:.5f}%)")
 
         print(f"\n{'='*80}\n")
 
@@ -1134,6 +1187,13 @@ class MetricsCalculator:
                 writer.writerow(["OP Correlation", f"{op_type} Median Latency (ms)", f"{a['median_latency_ms']:.5f}"])
                 writer.writerow(["OP Correlation", f"{op_type} p90 Latency (ms)", f"{a['p90_latency_ms']:.5f}"])
                 writer.writerow(["OP Correlation", f"{op_type} p99 Latency (ms)", f"{a['p99_latency_ms']:.5f}"])
+
+            # O1 (Right to be Informed): broker-auto-fulfilled, reported separately
+            o1 = metrics.o1_informed
+            writer.writerow(["O1 Informed", "REGISTER-INFO Requests Issued", f"{o1.register_info_requests}"])
+            writer.writerow(["O1 Informed", "Informed Notifications Received", f"{o1.informed_notifications}"])
+            writer.writerow(["O1 Informed", "Expected Pub-Sub Pairs", f"{o1.expected_pairs}"])
+            writer.writerow(["O1 Informed", "Informed Completion Rate", f"{o1.completion_rate:.4f}"])
 
         # Per-operation rows go to a sibling CSV with its own column schema
         self.export_op_correlation_to_csv(metrics, output_path)

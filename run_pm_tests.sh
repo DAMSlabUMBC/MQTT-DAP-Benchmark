@@ -62,12 +62,12 @@ for CONFIG in $CONFIG_FILES; do
     echo "${YELLOW}[$TEST_NUM/$TOTAL_TESTS]${NC} Running test: $CONFIG_NAME"
     echo "--------------------------------------------------------------------------------"
 
-    # Restart the broker between tests to clear out stored purposes/clients
-    if [ $TEST_NUM -gt 1 ]; then
-        echo "Restarting broker to clean state..."
-        docker restart "$BROKER_CONTAINER"
-        sleep 5
-    fi
+    # Restart the broker before every test for clean state: clears stored purposes,
+    # client sessions, the ri_registry (O1/REGISTER-INFO Informed state) and any
+    # retained messages, so each run starts fresh.
+    echo "Restarting broker to clean state..."
+    docker restart "$BROKER_CONTAINER"
+    sleep 5
 
     # Run the test (but don't analyze yet, that happens later in parallel)
     if docker exec "$RUNNER_CONTAINER" ./run_test_no_analyze.sh "$CONFIG" mosquitto 1883; then
