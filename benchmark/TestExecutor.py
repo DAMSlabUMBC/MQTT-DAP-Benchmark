@@ -356,7 +356,7 @@ class TestExecutor():
             if subscriber.mqtt_client_name not in self.pending_publishes:
                 self.pending_publishes[subscriber.mqtt_client_name] = {}
 
-            # is_response=True routes this through PUBLISH_OP_RESP logging; op_id is echoed verbatim.
+            # is_response=True routes this through PUBLISH_OP_RESP logging
             self.pending_publishes[subscriber.mqtt_client_name][message_info.mid] = (
                 topic, GlobalDefs.OP_PURPOSE, operation_type, now, op_id, True
             )
@@ -389,8 +389,7 @@ class TestExecutor():
             if publisher.mqtt_client_name not in self.pending_publishes:
                 self.pending_publishes[publisher.mqtt_client_name] = {}
 
-            # Op request from the publisher side: the broker hasn't assigned an op_id yet (and the
-            # publisher never sees it back in the current flow), so op_id is None -> logged as NONE.
+            # Op request: no broker op_id yet, logged as NONE
             self.pending_publishes[publisher.mqtt_client_name][message_info.mid] = (
                 topic, GlobalDefs.OP_PURPOSE, operation, now, None, False
             )
@@ -768,7 +767,7 @@ class TestExecutor():
                             # Subscriber's response to an op request -> PUBLISH_OP_RESP, carrying the echoed op_id
                             GlobalDefs.LOGGING_MODULE.log_operation_response_publish(time, self.my_id, device_instance.mqtt_client_name, corr_data, topic, purpose, op_type, op_category, op_id)
                         else:
-                            # Original op request -> PUBLISH_OP (op_id is None until a DAP broker assigns one)
+                            # Original op request -> PUBLISH_OP
                             GlobalDefs.LOGGING_MODULE.log_operation_publish(time, self.my_id, device_instance.mqtt_client_name, corr_data, topic, purpose, op_type, op_category, op_id)
                 
                 
@@ -799,7 +798,7 @@ class TestExecutor():
                         operational_response = True
                         op_message_type = value
                     elif name == GlobalDefs.PROPERTY_OP_ID:
-                        op_id = value  # raw decimal string from the broker; echo back verbatim
+                        op_id = value  # broker op_id (decimal string)
                         
             if hasattr(message.properties, "CorrelationData"):
                 correlation_data = int.from_bytes(message.properties.CorrelationData, byteorder='big', signed=False)

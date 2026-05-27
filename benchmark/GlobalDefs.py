@@ -9,8 +9,6 @@ if TYPE_CHECKING:
 
 # Framework Method Enums
 class PurposeManagementMethod(Enum):
-    # Collapsed to a single unified DAP method (based on the former PM_3):
-    # SP carried in SUBSCRIBE properties, MP registered via $DAP/MP_reg/<topic>, no $SP_REG.
     PM_UNIFIED = "Unified"
 
 class C1RightsMethod(Enum):
@@ -57,11 +55,11 @@ PROPERTY_MP: str = "DAP-MP"
 PROPERTY_SP: str = "DAP-SP"
 PROPERTY_ID: str = "DAP-ClientID"
 PROPERTY_CONSENT: str = "DAP-Allow"
-PROPERTY_OPTYPE: str = "DAP-OpType"      # was PROPERTY_OPERATION / "DAP-Operation"
+PROPERTY_OPTYPE: str = "DAP-OpType"
 PROPERTY_OP_INFO: str = "DAP-OpInfo"
 PROPERTY_OP_STATUS: str = "DAP-Status"
 
-# New unified-workflow properties (constants only for now; not yet wired into behavior)
+# Unified-workflow properties
 PROPERTY_TIMESTAMP: str = "DAP-Timestamp"
 PROPERTY_OP_BEFORE: str = "DAP-OpBefore"
 PROPERTY_OP_AFTER: str = "DAP-OpAfter"

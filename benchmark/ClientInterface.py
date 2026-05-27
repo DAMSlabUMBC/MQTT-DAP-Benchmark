@@ -129,9 +129,7 @@ def subscribe_with_purpose_filter(client: mqtt.Client, method: GlobalDefs.Purpos
     
     return_list: List[Tuple[mqtt.MQTTErrorCode, Optional[int], int]] = list()
 
-    # Unified method: the subscription purpose (SP) is supplied as a user property on the
-    # SUBSCRIBE. (existing_subscription / previous_purpose_filter are unused under the unified
-    # method but kept in the signature for call-site compatibility.)
+    # Unified method: the subscription purpose (SP) is sent as a user property on the SUBSCRIBE
     properties = mqtt.Properties(packetType=mqtt.PacketTypes.SUBSCRIBE)
     properties.UserProperty = (GlobalDefs.PROPERTY_SP, purpose_filter)
     properties.SubscriptionIdentifier = SUBSCRIPTION_ID_COUNTER
@@ -156,7 +154,7 @@ def subscribe_for_operations(client: mqtt.Client, method: GlobalDefs.PurposeMana
     return subscribe_with_purpose_filter(client, method, topic_filter, GlobalDefs.OP_PURPOSE, 2)
 
 
-"""Registers the message purpose (MP) for publications to a topic via $DAP/MP_reg/<topic>
+"""Registers the message purpose (MP) for publications to a topic
 
 Parameters
 ----------
@@ -179,11 +177,7 @@ paho.mqtt.client.MQTTErrorCode
 def register_publish_purpose_for_topic(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod, 
                                        topic: str, purpose: str, qos: int = 0) -> mqtt.MQTTMessageInfo | None:
     
-    # Unified method (paper 4.3, broker Registration-by-Message): register the message
-    # purpose (MP) for a topic by publishing to the single $DAP/purpose_management topic
-    # with the MP carried as a DAP-MP user property whose value is "<MP>:<topic>".
-    # (Empty payload; the broker parses the registration from the property and does not
-    # forward the message.)
+    # Register the MP for this topic via a DAP-MP user property ("<purpose>:<topic>"); empty payload
     mp_reg_topic = GlobalDefs.REG_BY_MSG_REG_TOPIC
 
     properties = mqtt.Properties(packetType=mqtt.PacketTypes.PUBLISH)
@@ -234,10 +228,9 @@ def publish_with_purpose(client: mqtt.Client, method: GlobalDefs.PurposeManageme
         required_bytes = ceil(correlation_data.bit_length() / 8.0)
         properties.CorrelationData = correlation_data.to_bytes(length=required_bytes, byteorder='big', signed=False)
 
-    # Unified method: data is published normally; the broker resolves delivery using the
-    # message purpose (MP) registered for this topic via register_publish_purpose_for_topic.
+    # Unified method: data is published normally; the broker resolves delivery via the registered MP
     msg_info = client.publish(topic, payload, qos=qos, retain=retain, properties=properties)
-    return [(msg_info, topic)]  # Return list of (message info, topic) tuples
+    return [(msg_info, topic)]
 
 
 def publish_operation_request(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod, operation: str, correlation_data: int | None = None, qos: int = 0) -> List[Tuple[mqtt.MQTTMessageInfo, str]]:
@@ -254,13 +247,6 @@ def publish_operation_request(client: mqtt.Client, method: GlobalDefs.PurposeMan
         required_bytes = ceil(correlation_data.bit_length() / 8.0)
         properties.CorrelationData = correlation_data.to_bytes(length=required_bytes, byteorder='big', signed=False)
 
-    # Operation vocabulary (new paper):
-    #   REGISTER-INFO - register "right to be informed" data (carries a payload)
-    #   AUDIT         - who received the data
-    #   HISTORY       - what data did they receive
-    #   DELETE        - erase data
-    #   RESTRICT      - restrict processing
-    #   UPDATE        - rectify/replace data (carries replacement payload)
     if operation == "REGISTER-INFO":
         return _handle_operation_publish(client, method, topic, GlobalDefs.OP_PURPOSE, properties, qos=qos, payload=f'{client._client_id.decode("utf-8")} Right to Know Data')
     elif operation in ("AUDIT", "HISTORY", "DELETE", "RESTRICT"):
@@ -279,9 +265,7 @@ def publish_operation_response(client: mqtt.Client, method: GlobalDefs.PurposeMa
     properties.UserProperty = (GlobalDefs.PROPERTY_OPTYPE, operation)
     properties.UserProperty = (GlobalDefs.PROPERTY_OP_STATUS, op_result)
 
-    # Echo the broker's op id back verbatim so it can match this notification to the
-    # operation it is tracking. The broker writes op_id as a decimal string and parses
-    # with strtoull, so we must send back the exact string we received (no int round-trip).
+    # Echo the broker's op_id back verbatim (decimal string) so it can match the notification
     if op_id is not None:
         properties.UserProperty = (GlobalDefs.PROPERTY_OP_ID, op_id)
 
@@ -291,22 +275,20 @@ def publish_operation_response(client: mqtt.Client, method: GlobalDefs.PurposeMa
         required_bytes = ceil(correlation_data.bit_length() / 8.0)
         properties.CorrelationData = correlation_data.to_bytes(length=required_bytes, byteorder='big', signed=False)
 
-    # Unified method: register the operational purpose, then publish the response.
     properties.UserProperty = (GlobalDefs.PROPERTY_ID, client._client_id)
     properties.UserProperty = (GlobalDefs.PROPERTY_CONSENT, "1")
 
-    register_publish_purpose_for_topic(client, method, topic, GlobalDefs.OP_PURPOSE, qos)  # Need to register
+    register_publish_purpose_for_topic(client, method, topic, GlobalDefs.OP_PURPOSE, qos)
     msg_info = client.publish(topic, qos=qos, properties=properties)
-    return [(msg_info, topic)]  # Return list of (message info, topic) tuples
+    return [(msg_info, topic)]
 
 
 def _handle_operation_publish(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod, 
                          topic: str, purpose: str, properties: mqtt.Properties, qos: int = 0, 
                          retain: bool = False, payload: str | None = None) -> List[Tuple[mqtt.MQTTMessageInfo, str]]:
         
-    # Unified method: publish the operational message with client id + consent properties.
     properties.UserProperty = (GlobalDefs.PROPERTY_ID, client._client_id)
     properties.UserProperty = (GlobalDefs.PROPERTY_CONSENT, "1")
 
     msg_info = client.publish(topic, payload, qos=qos, retain=retain, properties=properties)
-    return [(msg_info, topic)]  # Return list of (message info, topic) tuples
+    return [(msg_info, topic)]

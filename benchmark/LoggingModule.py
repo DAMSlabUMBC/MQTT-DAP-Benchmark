@@ -170,11 +170,6 @@ class ResultLogger:
         self.log_queue.put(message)
         
     def log_operation_publish(self, timestamp, benchmark_id, client_id, corr_data, topic_name, purpose, op_type, op_category, op_id=None):
-        # PUBLISH_OP@@timestamp@@benchmark_id@@client_id@@topic@@purpose@@op_type@@op_category@@corr_data@@op_id
-        # op_id (field index 9, appended last so existing positional parsers are unaffected) is the
-        # broker-assigned operation id. The publisher never sees it back in the current flow, so it is
-        # "NONE" here; it is carried for parity with PUBLISH_OP_RESP. None is logged as "NONE" so the
-        # field is always present.
         op_id_field = op_id if op_id is not None else "NONE"
         message = f"{OP_PUBLISH_LABEL}{SEPARATOR}{timestamp}{SEPARATOR}{benchmark_id}{SEPARATOR}{client_id}{SEPARATOR}{topic_name}{SEPARATOR}{purpose}{SEPARATOR}{op_type}{SEPARATOR}{op_category}{SEPARATOR}{corr_data}{SEPARATOR}{op_id_field}"
         self.log_queue.put(message)
@@ -188,10 +183,6 @@ class ResultLogger:
         self.log_queue.put(message)
         
     def log_operation_response_publish(self, timestamp, benchmark_id, client_id, corr_data, topic_name, purpose, op_type, op_category, op_id=None):
-        # PUBLISH_OP_RESP@@timestamp@@benchmark_id@@client_id@@topic@@purpose@@op_type@@op_category@@corr_data@@op_id
-        # op_id (field index 9, appended last so existing positional parsers are unaffected) is the
-        # broker-assigned operation id echoed back from the originating request, used downstream to
-        # correlate responses to requests. None is logged as "NONE" so the field is always present.
         op_id_field = op_id if op_id is not None else "NONE"
         message = f"{OP_RESP_PUBLISH_LABEL}{SEPARATOR}{timestamp}{SEPARATOR}{benchmark_id}{SEPARATOR}{client_id}{SEPARATOR}{topic_name}{SEPARATOR}{purpose}{SEPARATOR}{op_type}{SEPARATOR}{op_category}{SEPARATOR}{corr_data}{SEPARATOR}{op_id_field}"
         self.log_queue.put(message)
