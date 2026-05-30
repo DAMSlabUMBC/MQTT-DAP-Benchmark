@@ -864,8 +864,8 @@ class MetricsCalculator:
 
     def calculate_o1_informed(self) -> O1InformedMetrics:
         """O1 (REGISTER-INFO / Informed) is auto-fulfilled by the broker on first data
-        receipt (paper 7.1), so it is measured as Informed notifications received against
-        one expected per publisher-subscriber data-flow pair, not by a request join"""
+        receipt, so it is measured as Informed notifications received against one
+        expected per publisher-subscriber data-flow pair, not by a request join"""
         m = O1InformedMetrics()
         m.register_info_requests = sum(1 for e in self.op_publish_events if e.op_type == "REGISTER-INFO")
         m.informed_notifications = sum(1 for e in self.op_resp_recv_events if e.op_type == "Informed")
