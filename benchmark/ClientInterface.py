@@ -116,18 +116,35 @@ Returns
 tuple[paho.mqtt.client.MQTTErrorCode, int | None]
     A tuple containing the error code and (if successful) the granted quality of service for the subscription
 """
-def subscribe_with_purpose_filter(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod, 
-                                  topic_filter: str, purpose_filter: str, 
+def subscribe_with_purpose_filter(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod,
+                                  topic_filter: str, purpose_filter: str,
                                   qos: int = 0, no_local=True, existing_subscription=False, previous_purpose_filter="") -> List[Tuple[mqtt.MQTTErrorCode, Optional[int], int]]:
-    
+
     global SUBSCRIPTION_ID_COUNTER
-    
+
     if purpose_filter == None:
         purpose_filter = GlobalDefs.ALL_PURPOSE_FILTER
-        
+
     subscribe_options = SubscribeOptions(qos=qos, noLocal=no_local)
-    
+
     return_list: List[Tuple[mqtt.MQTTErrorCode, Optional[int], int]] = list()
+
+    # Topic-encoded method appends the purpose as a bracketed topic level and uses no DAP user
+    # properties. Operational subscriptions keep the unified shape since the broker is vanilla
+    # and ignores unknown properties.
+    if method == GlobalDefs.PurposeManagementMethod.PM_TOPIC_ENCODED and purpose_filter != GlobalDefs.OP_PURPOSE:
+        encoded_filter = f"{topic_filter}/[{purpose_filter}]"
+        properties = mqtt.Properties(packetType=mqtt.PacketTypes.SUBSCRIBE)
+        properties.SubscriptionIdentifier = SUBSCRIPTION_ID_COUNTER
+        try:
+            unsub_properties = mqtt.Properties(packetType=mqtt.PacketTypes.UNSUBSCRIBE)
+            client.unsubscribe(encoded_filter, properties=unsub_properties)
+            result, mid = client.subscribe(encoded_filter, properties=properties, options=subscribe_options)
+            return_list.append((result, mid, SUBSCRIPTION_ID_COUNTER))
+        except Exception:
+            return_list.append((mqtt.MQTTErrorCode.MQTT_ERR_UNKNOWN, None, SUBSCRIPTION_ID_COUNTER))
+        SUBSCRIPTION_ID_COUNTER += 1
+        return return_list
 
     # Unified method: the subscription purpose (SP) is sent as a user property on the SUBSCRIBE
     properties = mqtt.Properties(packetType=mqtt.PacketTypes.SUBSCRIBE)
@@ -174,9 +191,13 @@ Returns
 paho.mqtt.client.MQTTErrorCode
     The message publication information
 """
-def register_publish_purpose_for_topic(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod, 
+def register_publish_purpose_for_topic(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod,
                                        topic: str, purpose: str, qos: int = 0) -> mqtt.MQTTMessageInfo | None:
-    
+
+    # Topic-encoded method has no broker-side MP registry; the purpose lives in the publish topic.
+    if method == GlobalDefs.PurposeManagementMethod.PM_TOPIC_ENCODED:
+        return None
+
     # Register the MP for this topic via a DAP-MP user property ("<purpose>:<topic>"); empty payload
     mp_reg_topic = GlobalDefs.REG_BY_MSG_REG_TOPIC
 
