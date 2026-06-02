@@ -73,8 +73,8 @@ OR_TOPIC: str = "OR"
 ORS_TOPIC: str = "ORS"
 ON_TOPIC: str = "ON"
 ONP_TOPIC: str = "ONP"
-OSYS_TOPIC: str = "$OSYS"
-OP_RESPONSE_TOPIC: str = "op_resp"
+OSYS_TOPIC: str = "$OP_SYS"
+OP_RESPONSE_TOPIC: str = "OP_NOTIF"
 OP_PURPOSE: str = "DAP_OP"
 
 # Required functions for the client
