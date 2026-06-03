@@ -219,3 +219,76 @@ def assemble_config(set_id, variant, n_purposes, dynamic_side, with_ops, connect
         **_ops_block(with_ops),
     }
     return cfg
+
+
+def build_matrix():
+    """Return list of (set_subdir, filename, config_dict) for all 20 configs."""
+    matrix = []
+
+    def add(set_id, subdir, variant, n, side, ops, conn):
+        cfg = assemble_config(set_id, variant, n, side, ops, conn)
+        matrix.append((subdir, cfg["test"]["name"] + ".cfg", cfg))
+
+    # (i) static, no ops: 1/10/100
+    for n in (1, 10, 100):
+        add(1, "set1_static", "static", n, None, False, False)
+
+    # (ii) dynamic, no ops: {10,100} x {mp,sp,both}
+    for n in (10, 100):
+        for side in ("mp", "sp", "both"):
+            add(2, "set2_dynamic", f"dynamic_{side}", n, side, False, False)
+
+    # (iii) static, with ops: 1/10/100
+    for n in (1, 10, 100):
+        add(3, "set3_static_ops", "static_ops", n, None, True, False)
+
+    # (iv) dynamic, with ops: {10,100} x {mp,sp,both}
+    for n in (10, 100):
+        for side in ("mp", "sp", "both"):
+            add(4, "set4_dynamic_ops", f"dynamic_{side}", n, side, True, False)
+
+    # (v) dynamic connectivity (as iii + disconnect): 10/100 only
+    for n in (10, 100):
+        add(5, "set5_connectivity", "connectivity", n, None, True, True)
+
+    return matrix
+
+
+def write_matrix(out_root):
+    written = []
+    for subdir, filename, cfg in build_matrix():
+        d = os.path.join(out_root, subdir)
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, filename)
+        with open(path, "w") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=False)
+        written.append(path)
+    return written
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Generate the v2 experiment matrix")
+    ap.add_argument("--out-dir", default="test-configs/v2")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print per-config counts without writing")
+    args = ap.parse_args()
+
+    if args.dry_run:
+        for subdir, filename, cfg in build_matrix():
+            t = cfg["test"]
+            n_pubs = len([d for d in cfg["device_definitions"] if d["type"] == "publisher"])
+            n_subs = len([i for i in t["device_instances"]
+                          if i["device_def_id"] == SUBSCRIBER_DEF_ID])
+            print(f"{subdir}/{filename}: "
+                  f"{n_pubs} pubs, {n_subs} subs, "
+                  f"{len(cfg['purpose_definitions'])} purposes, "
+                  f"{len(t['scheduled_events'])} events, "
+                  f"ops={t['op_send_rate']}")
+        return
+
+    paths = write_matrix(args.out_dir)
+    print(f"Wrote {len(paths)} configs to {args.out_dir}")
+
+
+if __name__ == "__main__":
+    main()
