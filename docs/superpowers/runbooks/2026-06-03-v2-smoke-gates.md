@@ -72,7 +72,14 @@ names are still stale (see below).
 | B (MP re-register) | set2_dynamic_mp_10p | **PASS on routing; bump_count=0** | 17 MP changes fired; subset pub dev08 cycles purpose p8→p1→…→p10 per tick while dev01 stays p1; FAR=FRR=0 → every re-purposed msg routed to the new-purpose subscriber. bump_count=0 because QoS-0 delivery never holds msgs to re-verify (bump is for queued/SP-change). Literal "bump>0" criterion not applicable here. |
 | C (140 clients) | set1_static_100p | **PASS** | 140 connect / 140 clean disconnect, 0 paho errors, 0 rejects |
 | F (sustain msg/s) | set1_static_100p | **FAIL (literal)** | 845 msg/s achieved vs ~1,136 configured (~26% short). Correctness perfect (FAR=FRR=0, 151,920/151,920). Single-process Python can't hit the 10 ms AMR cadence. → spec O1. |
-| OP (single op issuer) | (not run) | **BLOCKED** | op topics still stale: `$OSYS`→`$OP_SYS`, `ors`→`OP_REQ`, `onp`→`OP_NOTIF`. Needed for Gate OP + sets iii/iv/v. |
+| OP (single op issuer) | set3_static_ops_10p | **PASS on criterion; op cycle does NOT complete** | After the op-topic fix: one pinned publisher **dev25** issued all 90 periodic ops (18 each AUDIT/HISTORY/UPDATE/DELETE/RESTRICT), zero rotation, 0 rejects. BUT op completion = 0 (90 issued / 0 completed; PUBLISH_OP_RESP=0; REGISTER-INFO 10 issued / 0 completed). Subscribers subscribe `OP_REQ/<sub>`, publishers `OP_NOTIF/<pub>`, but no op request is received/answered. |
+
+**Open blocker for sets iii/iv/v (op correctness):** the operational request→forward→response cycle
+does not complete (completion 0, coverage 0). Wiring/topics look right; likely cause is another
+stale registration topic (`reg_by_topic_sub_reg_topic: "$DAP/SP_reg"` — no matching broker constant
+found) or REGISTER-INFO not registering consumer data (its completion is also 0), so AUDIT/HISTORY/etc
+have no registered data to act on. Needs investigation before any iii/iv/v sweep. Data-path sets
+(i, ii) and Gate OP's single-issuer guarantee are unaffected.
 
 **Decisions (resolved 2026-06-03):**
 1. **Gate B → accept routing-proof.** `bump_count=0` is correct for QoS-0 (bump only re-verifies
