@@ -271,10 +271,16 @@ def publish_operation_request(client: mqtt.Client, method: GlobalDefs.PurposeMan
     if operation == "REGISTER-INFO":
         return _handle_operation_publish(client, method, topic, GlobalDefs.OP_PURPOSE, properties, qos=qos, payload=f'{client._client_id.decode("utf-8")} Right to Know Data')
     elif operation in ("AUDIT", "HISTORY", "DELETE", "RESTRICT"):
-        properties.UserProperty = (GlobalDefs.PROPERTY_OP_INFO, "*")
+        # Scope the operation with the broker-recognized filters (DAP-OpTFs/DAP-OpPFs);
+        # "*" = MOSQ_DAP_ALLOW_ALL_FILTER. (The broker ignores DAP-OpInfo.)
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_TFS, "*")
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_PFS, "*")
         return _handle_operation_publish(client, method, topic, GlobalDefs.OP_PURPOSE, properties, qos=qos)
     elif operation == "UPDATE":
-        properties.UserProperty = (GlobalDefs.PROPERTY_OP_INFO, "*")
+        # Scope the operation with the broker-recognized filters (DAP-OpTFs/DAP-OpPFs);
+        # "*" = MOSQ_DAP_ALLOW_ALL_FILTER. (The broker ignores DAP-OpInfo.)
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_TFS, "*")
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_PFS, "*")
         return _handle_operation_publish(client, method, topic, GlobalDefs.OP_PURPOSE, properties, qos=qos, payload="ReplacementData")
     else:
         return list()
