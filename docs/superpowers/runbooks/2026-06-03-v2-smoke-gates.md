@@ -74,7 +74,18 @@ names are still stale (see below).
 | F (sustain msg/s) | set1_static_100p | **FAIL (literal)** | 845 msg/s achieved vs ~1,136 configured (~26% short). Correctness perfect (FAR=FRR=0, 151,920/151,920). Single-process Python can't hit the 10 ms AMR cadence. → spec O1. |
 | OP (single op issuer) | (not run) | **BLOCKED** | op topics still stale: `$OSYS`→`$OP_SYS`, `ors`→`OP_REQ`, `onp`→`OP_NOTIF`. Needed for Gate OP + sets iii/iv/v. |
 
-**Pending decisions before sets iii/iv/v and the full sweep:** (1) Gate B acceptance criterion
-(routing-proof vs requiring a held/QoS>0 bump scenario); (2) Gate F shortfall handling (O1: scale
-AMR rates vs report achieved-vs-configured); (3) apply the op-topic corrections, and whether to also
-fix the shared legacy/observer configs (equally stale).
+**Decisions (resolved 2026-06-03):**
+1. **Gate B → accept routing-proof.** `bump_count=0` is correct for QoS-0 (bump only re-verifies
+   held/queued messages); MP re-registration is proven by per-tick purpose cycling + FAR/FRR=0.
+   Spec criterion updated. **Coverage gap flagged:** the QoS-0 matrix never exercises the broker's
+   bump/held-message re-verification path (§5 queuing model) — needs a QoS>0/held case elsewhere
+   (separate work), not fixed here.
+2. **Gate F → report achieved-vs-configured; do NOT scale rates.** Correctness is rate-independent
+   (perfect here); the throughput story comes from PSMark on the Pis, not this harness. Log
+   achieved vs configured msg/s per run (845 vs ~1,136 here).
+3. **Op topics → fixed everywhere** (v2 generator + legacy set1-5 + dap_observed + phase_a +
+   templates): `$OSYS`→`$OP_SYS`, `ORS`→`OP_REQ`, `ONP`→`OP_NOTIF`, confirmed against `defs.h`.
+   (`or_topic_name`/`on_topic_name` = "OR"/"ON" left as-is — no broker constant, harmless.)
+
+**Next:** Gate OP (confirm a single pinned publisher issues all periodic ops across all ticks),
+then stop and report before any iii/iv/v sweep.
