@@ -100,3 +100,22 @@ def test_subset_selection_is_deterministic():
 def test_subset_selection_differs_by_label():
     ids = [f"dev{i:02d}" for i in range(1, 41)]
     assert gen.select_subset(ids, label="mp") != gen.select_subset(ids, label="sp")
+
+
+def test_tick_times():
+    ticks = gen.tick_times()
+    assert ticks[0] == 10100
+    assert ticks[-1] == 170100
+    assert len(ticks) == 17
+
+
+def test_change_purpose_events_cycle_purposes():
+    subset = ["dev01", "dev05"]
+    evs = gen.change_purpose_events(subset, n_purposes=10)
+    assert len(evs) == 17
+    assert evs[0]["time_ms"] == 10100
+    assert evs[0]["type"] == "change_purpose"
+    assert evs[0]["devices"] == ["dev01", "dev05"]
+    assert evs[0]["new_purpose"] == "p1"
+    assert evs[1]["new_purpose"] == "p2"
+    assert evs[10]["new_purpose"] == "p1"

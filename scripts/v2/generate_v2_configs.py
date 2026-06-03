@@ -102,3 +102,27 @@ def select_subset(ids, label):
     rng = random.Random(f"{SEED}:{label}")
     chosen = rng.sample(sorted(ids), k)
     return sorted(chosen)
+
+
+def tick_times():
+    times = []
+    t = TICK_START_MS
+    # include a tick while a full interval still fits before the run ends
+    while t + TICK_INTERVAL_MS <= DURATION_MS:
+        times.append(t)
+        t += TICK_INTERVAL_MS
+    return times
+
+
+def change_purpose_events(subset, n_purposes):
+    events = []
+    for tick_idx, t in enumerate(tick_times()):
+        purpose = f"p{(tick_idx % n_purposes) + 1}"
+        events.append({
+            "time_ms": t,
+            "type": "change_purpose",
+            "devices": list(subset),
+            "new_purpose": purpose,
+            "description": f"Dynamic change: {len(subset)} devices -> {purpose}",
+        })
+    return events
