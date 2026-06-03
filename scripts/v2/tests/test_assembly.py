@@ -65,3 +65,39 @@ def test_matrix_filenames_unique():
     matrix = gen.build_matrix()
     fns = [fn for _, fn, _ in matrix]
     assert len(set(fns)) == len(fns)
+
+
+import os
+import sys
+import tempfile
+import importlib
+
+import pytest
+
+BENCH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "benchmark")
+
+
+@pytest.fixture
+def config_parser():
+    sys.path.insert(0, os.path.abspath(BENCH))
+    import GlobalDefs  # noqa: F401  (ConfigParser imports it)
+    cp_mod = importlib.import_module("ConfigParser")
+    yield cp_mod
+    sys.path.remove(os.path.abspath(BENCH))
+
+
+def test_all_configs_roundtrip_through_configparser(config_parser):
+    matrix = gen.build_matrix()
+    with tempfile.TemporaryDirectory() as tmp:
+        gen.write_matrix(tmp)
+        for subdir, filename, cfg in matrix:
+            path = os.path.join(tmp, subdir, filename)
+            parser = config_parser.ConfigParser()
+            parser.the_config = config_parser.BenchmarkConfiguration()
+            parser.the_config.test_list = []
+            parsed = parser.parse_config(path)
+            tc = parsed.test_list[-1]
+            n = len(cfg["purpose_definitions"])
+            assert len(tc.device_instances_config) == 40 + n
+            assert tc.qos == 0
+            assert tc.test_duration_ms == 180100
