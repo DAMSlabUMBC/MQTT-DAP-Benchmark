@@ -161,14 +161,25 @@ config generation.
 These are **gates, not nice-to-haves**. Sets ii/iv exercise broker code paths that never ran
 under load in Phase A (which was static-only, `bump_count=0`).
 
-### Gate B — publisher MP re-register → broker bump (HARD GATE)
+### Gate B — publisher MP re-register, routing-proof under QoS-0 (HARD GATE)
 The publisher `change_purpose` path (`_handle_change_purpose` → `register_publish_purpose_for_topic`)
 **was never exercised in Phase A.** Sets ii/iv depend on broker code that has never handled an MP
-change under load. A smoke run of one dynamic-MP config **must** confirm:
-1. broker `bump_count > 0` after the first `change_purpose` tick, and
-2. post-change routing is correct — messages from a re-registered publisher reach exactly the
-   subscribers whose purpose matches the *new* MP (and no longer the old one), scored via
-   `MetricsCalculator` FAR/FRR.
+change under load. A smoke run of one dynamic-MP config **must** confirm post-change routing:
+each `PUBLISH` line logs the publisher's *current* purpose (updated on `change_purpose`), so a
+subset publisher's logged purpose must cycle every tick while a non-subset publisher stays fixed,
+and `MetricsCalculator` FAR/FRR must be 0 — i.e. every re-purposed message reached exactly the
+subscriber whose SP matches the *new* MP. That proves the MP re-registration took effect.
+
+**Criterion is routing-proof, NOT `bump_count > 0`.** `bump_count` only increments when the broker
+re-verifies a message that is *held/queued* on the out-path at the moment a version changes
+(`database.c` `DAP_DISP_BUMP`). Under QoS-0 immediate delivery nothing is held, so an MP change
+re-routes only *future* messages and `bump_count == 0` is the correct, expected result. (Verified
+2026-06-03: dev08 cycled p8→p1→…→p10 per tick, FAR=FRR=0, bump_count=0.)
+
+> **Coverage gap (flagged, not fixed):** because the v2 matrix is QoS-0, it never exercises the
+> broker's bump / held-message re-verification path — a core piece of the §5 queuing model the paper
+> formalizes. A QoS>0 or retained/held-message case must exercise bump *somewhere* (separate work),
+> or the evaluation never triggers a mechanism the paper claims.
 
 No dynamic sweep (ii or iv) runs until Gate B passes.
 
