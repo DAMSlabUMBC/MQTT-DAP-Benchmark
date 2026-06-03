@@ -47,3 +47,21 @@ def test_set5_connectivity_has_disconnect_and_ops():
     assert len(_events_of_type(cfg, "disconnect")) == 1
     assert len(_events_of_type(cfg, "reconnect")) == 1
     assert cfg["test"]["op_send_rate"] == 10000
+
+
+def test_matrix_is_20_configs():
+    matrix = gen.build_matrix()
+    assert len(matrix) == 20
+    names = sorted(fn for _, fn, _ in matrix)
+    assert any(n.startswith("v2_set1_static_1p") for n in names)
+    assert any(n.startswith("v2_set1_static_100p") for n in names)
+    assert sum(1 for n in names if n.startswith("v2_set2_")) == 6
+    assert sum(1 for n in names if n.startswith("v2_set4_")) == 6
+    assert sum(1 for n in names if n.startswith("v2_set5_")) == 2
+    assert not any(n.startswith("v2_set5_") and "_1p_" in n for n in names)
+
+
+def test_matrix_filenames_unique():
+    matrix = gen.build_matrix()
+    fns = [fn for _, fn, _ in matrix]
+    assert len(set(fns)) == len(fns)
