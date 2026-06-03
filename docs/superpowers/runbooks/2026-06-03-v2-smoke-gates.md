@@ -139,3 +139,50 @@ SP-change instant, not over-delivery to non-matching subscribers.
 
 **set1_static_1p rerun:** full 180s, PUB=RECV=153516, join 100%/100%, FAR=FRR=0. The first attempt's
 38s stop (silent 40→1 fan-in disconnect) was not reproducible. The 1p cell counts as valid.
+
+---
+
+## Operations re-enabled + verified (scope A+b, 2026-06-03)
+
+**Root cause was upstream of the op_info mismatch:** `metadata_operation_handling` was hardcoded
+false — its enabling directive `use_metadata_operation_support` was removed in broker commit
+`e4ad561b` ("Config updates"), gating the entire op dispatch + `dr__record_recipient` off. Fix:
+- broker `conf.c`: restored the `use_metadata_operation_support` directive (commit on branch
+  `dap-reenable-operations`); `handle_publish.c`: `op_info = op_topic_filters` alias.
+- harness `ClientInterface.py`: send `DAP-OpTFs`/`DAP-OpPFs` (="*") instead of the ignored `DAP-OpInfo`.
+- `mosquitto-unified.conf`: `use_metadata_operation_support true`.
+
+**ASan/UBSan verify** (Dockerfile.asan image, `--privileged` to dodge the kernel-6.8 ASLR-entropy
+ASan-init crash — not a code issue): full set3 lifecycle (startup + 180s + ops + teardown) =
+**0 ASan/UBSan reports**. All ops completed 100%.
+
+**Production rebuild + teardown check:** unified broker rebuilt from the branch, starts clean (op
+directive parses, no unknown-variable error), survived the run (Running, Exit 0, 1883 open, no
+segfault).
+
+**Production set3 per-operation completion (the official numbers):**
+
+| Op | Issued | Completion |
+|---|---|---|
+| AUDIT | 17 | **100%** |
+| DELETE | 17 | **100%** |
+| HISTORY | 17 | **100%** |
+| RESTRICT | 17 | **100%** |
+| UPDATE | 17 | **100%** |
+| REGISTER-INFO | 10 | n/a (fire-and-forget; no response by design) |
+
+Overall completion 1.0, coverage 0.80, leakage 0.0. Op issuer pinned to one publisher (dev25).
+Data path: FAR 0, FRR 0.0010, 154,887 valid / 0 invalid.
+
+**AUDIT did NOT need a separate fix** — contrary to the (a)/(b) prediction. AUDIT's path depends on
+REGISTER-INFO (`ri__register_info`), which was itself gated by the disabled flag; re-enabling the
+flag fixed AUDIT too. All five core ops complete.
+
+**To flag before any iii/iv/v sweep:** (1) coverage = 0.80 (not 1.0), deterministic across ASan and
+production runs — worth understanding (per-op data-coverage semantics) though completion is 100%.
+(2) set3 data FRR = 0.0010 (tiny; earlier ops-free static runs were 0) — likely op/data contention
+or a startup-window miss. Neither blocks, but both warrant a look before committing to the full sweep.
+
+**Follow-up logged (not done):** the dead shadowed AUDIT(731)/HISTORY(767) branches in
+handle_publish.c should be removed so those ops use the dr__ paths — larger broker change, deferred
+to Section 6 verification per the scope decision.
