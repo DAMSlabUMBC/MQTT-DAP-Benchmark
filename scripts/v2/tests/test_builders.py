@@ -79,3 +79,24 @@ def test_purpose_definitions_count():
     pdefs = gen.build_purpose_definitions(10)
     assert len(pdefs) == 10
     assert pdefs[0] == {"id": "p1", "description": "Purpose 1"}
+
+
+def test_subset_size_round_half_up():
+    assert gen.subset_size(40) == 10
+    assert gen.subset_size(10) == 3   # round-half-up of 2.5
+    assert gen.subset_size(100) == 25
+    assert gen.subset_size(1) == 1    # min 1
+
+
+def test_subset_selection_is_deterministic():
+    ids = [f"dev{i:02d}" for i in range(1, 41)]
+    a = gen.select_subset(ids, label="mp")
+    b = gen.select_subset(ids, label="mp")
+    assert a == b
+    assert len(a) == 10
+    assert set(a).issubset(set(ids))
+
+
+def test_subset_selection_differs_by_label():
+    ids = [f"dev{i:02d}" for i in range(1, 41)]
+    assert gen.select_subset(ids, label="mp") != gen.select_subset(ids, label="sp")

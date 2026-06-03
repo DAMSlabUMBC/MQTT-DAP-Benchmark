@@ -85,3 +85,20 @@ def build_subscriber_instances(n_purposes):
 def build_purpose_definitions(n_purposes):
     return [{"id": f"p{k}", "description": f"Purpose {k}"}
             for k in range(1, n_purposes + 1)]
+
+
+def subset_size(count):
+    """25% of count, round-half-up, minimum 1."""
+    return max(1, math.floor(0.25 * count + 0.5))
+
+
+def select_subset(ids, label):
+    """Deterministically pick subset_size(len(ids)) ids.
+
+    Seeded per (SEED, label) so MP and SP subsets differ but are reproducible.
+    Sorts the input first so selection is independent of caller ordering.
+    """
+    k = subset_size(len(ids))
+    rng = random.Random(f"{SEED}:{label}")
+    chosen = rng.sample(sorted(ids), k)
+    return sorted(chosen)
