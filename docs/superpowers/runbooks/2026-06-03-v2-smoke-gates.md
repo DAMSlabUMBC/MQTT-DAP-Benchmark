@@ -105,7 +105,7 @@ Freshness verified by log timestamps (NOT exit codes): per-device RECV↔PUBLISH
 
 | Config | span | join (median / min) | FAR | FRR | valid / invalid | msg/s | verdict |
 |---|---|---|---|---|---|---|---|
-| set1_static_1p | **38s** | 100% / 100% | 0 | 0 | 34686 / 0 | 910 | ❌ PARTIAL — rerun |
+| set1_static_1p (rerun) | 180s | 100% / 100% | 0 | 0 | 153516 / 0 | 853 | ✅ (1st try stopped @38s, not reproducible) |
 | set1_static_10p | 180s | 100% / 100% | 0 | 0 | 147980 / 0 | 822 | ✅ |
 | set1_static_100p | 180s | 100% / 100% | 0 | 0 | 130788 / 0 | 727 | ✅ |
 | set2_dynamic_mp_10p | 180s | 100% / 100% | 0 | 0 | 144288 / 0 | 802 | ✅ |
@@ -126,3 +126,16 @@ fan-in the broker dropped the publishers with a non-zero reason code; `TestExecu
 only handles `reason_code==0`, so it neither logged the drop nor cleared `is_connected` — publishes
 silently failed while the loop kept running. Latent harness gap (out of current scope); rerun the
 1p cell. Confirms why exit codes are not trusted.
+
+**Dynamic-SP over-delivery verified as genuine fan-out (not a scoring artifact):** for
+set2_dynamic_sp_10p, reconstructed each subscriber's active SP from its `SUBSCRIBE` re-subscribe
+timeline. Worked example: msg dev31/corr=501 (publisher MP=p1) delivered to subscribers p1, p5, p7 —
+all with active SP=p1 (the 25% subset {p1,p5,p7} had cycled onto p1 together). Full scan: across
+50,430 multi-delivered (receiver,message) pairs, only 2 receivers had a non-matching SP, and both
+landed 4–6 ms after that subscriber's SP re-subscribe (an in-flight message crossing the
+re-subscription boundary) — exactly the analyzer's `invalid=2`. Conclusion: >100% join = the subset
+legitimately sharing a purpose; FAR=0 is real; the 2 boundary invalids are a sub-ms race at the
+SP-change instant, not over-delivery to non-matching subscribers.
+
+**set1_static_1p rerun:** full 180s, PUB=RECV=153516, join 100%/100%, FAR=FRR=0. The first attempt's
+38s stop (silent 40→1 fan-in disconnect) was not reproducible. The 1p cell counts as valid.
