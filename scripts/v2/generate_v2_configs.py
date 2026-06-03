@@ -126,3 +126,23 @@ def change_purpose_events(subset, n_purposes):
             "description": f"Dynamic change: {len(subset)} devices -> {purpose}",
         })
     return events
+
+
+def lifecycle_events():
+    return [
+        {"time_ms": 0, "type": "connect_all", "description": "Connect all devices"},
+        {"time_ms": START_PUBLISH_MS, "type": "start_publishing_all",
+         "description": "Start all publishers"},
+        {"time_ms": DURATION_MS, "type": "disconnect_all",
+         "description": "Disconnect all devices"},
+    ]
+
+
+def connectivity_events(subscriber_ids):
+    subset = select_subset(subscriber_ids, label="disconnect")
+    return [
+        {"time_ms": DISCONNECT_MS, "type": "disconnect", "devices": subset,
+         "description": f"Disconnect {len(subset)} subscribers (1/3 of run)"},
+        {"time_ms": RECONNECT_MS, "type": "reconnect", "devices": subset,
+         "description": f"Reconnect {len(subset)} subscribers (2/3 of run)"},
+    ]

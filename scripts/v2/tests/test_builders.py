@@ -119,3 +119,23 @@ def test_change_purpose_events_cycle_purposes():
     assert evs[0]["new_purpose"] == "p1"
     assert evs[1]["new_purpose"] == "p2"
     assert evs[10]["new_purpose"] == "p1"
+
+
+def test_lifecycle_events():
+    evs = gen.lifecycle_events()
+    assert evs[0] == {"time_ms": 0, "type": "connect_all",
+                      "description": "Connect all devices"}
+    assert evs[1]["type"] == "start_publishing_all"
+    assert evs[1]["time_ms"] == 100
+    assert evs[-1] == {"time_ms": 180100, "type": "disconnect_all",
+                       "description": "Disconnect all devices"}
+
+
+def test_connectivity_events():
+    sub_ids = [f"device_subscriber_p{k}" for k in range(1, 11)]
+    evs = gen.connectivity_events(sub_ids)
+    assert len(evs) == 2
+    assert evs[0]["time_ms"] == 60100 and evs[0]["type"] == "disconnect"
+    assert evs[1]["time_ms"] == 120100 and evs[1]["type"] == "reconnect"
+    assert len(evs[0]["devices"]) == 3   # 25% of 10, round-half-up
+    assert evs[0]["devices"] == evs[1]["devices"]
