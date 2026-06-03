@@ -58,3 +58,24 @@ def test_publisher_purpose_assignment_n100_uses_only_40():
 def test_publisher_purpose_assignment_n1():
     insts = gen.build_publisher_instances(1)
     assert {i["purpose_filter"] for i in insts} == {"p1"}
+
+
+def test_subscriber_definition_is_wildcard():
+    sdef = gen.build_subscriber_definition()
+    assert sdef["type"] == "subscriber"
+    assert sdef["topic_filter"] == "device/+"
+
+
+def test_subscriber_instances_one_per_purpose():
+    insts = gen.build_subscriber_instances(100)
+    assert len(insts) == 100
+    assert insts[0]["purpose_filter"] == "p1"
+    assert insts[99]["purpose_filter"] == "p100"
+    assert insts[0]["device_def_id"] == "device_subscriber"
+    assert insts[0]["instance_id"] == "device_subscriber_p1"
+
+
+def test_purpose_definitions_count():
+    pdefs = gen.build_purpose_definitions(10)
+    assert len(pdefs) == 10
+    assert pdefs[0] == {"id": "p1", "description": "Purpose 1"}

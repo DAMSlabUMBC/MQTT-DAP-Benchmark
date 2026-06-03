@@ -60,3 +60,28 @@ def build_publisher_instances(n_purposes):
             "count": 1,
         })
     return insts
+
+
+def build_subscriber_definition():
+    return {
+        "id": SUBSCRIBER_DEF_ID,
+        "type": "subscriber",
+        "topic_filter": "device/+",
+    }
+
+
+def build_subscriber_instances(n_purposes):
+    insts = []
+    for k in range(1, n_purposes + 1):
+        insts.append({
+            "device_def_id": SUBSCRIBER_DEF_ID,
+            "instance_id": f"{SUBSCRIBER_DEF_ID}_p{k}",
+            "purpose_filter": f"p{k}",
+            "count": 1,
+        })
+    return insts
+
+
+def build_purpose_definitions(n_purposes):
+    return [{"id": f"p{k}", "description": f"Purpose {k}"}
+            for k in range(1, n_purposes + 1)]
