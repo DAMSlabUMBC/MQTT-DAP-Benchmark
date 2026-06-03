@@ -731,12 +731,20 @@ class MetricsCalculator:
                 else:
                     metrics.irrelevant_recv += 1
                     
-            if metrics.relevant_recv < metrics.relevant_subs and op_pub.op_category == 'C1':
-                
-                # For C1 ops alone, it's possible only the broker will respond
+            # Broker-fulfilled ops have no subscriber forward, so their coverage is
+            # measured by the broker's direct response, not subscriber receipts:
+            #  - C1 registration replies, and
+            #  - AUDIT (C2), which the broker answers directly from its data-registration
+            #    registry rather than forwarding to subscribers.
+            # Without this, AUDIT scores a structural coverage 0 (relevant_recv=0) and
+            # drags the per-run average to ~0.80. Only coverage is affected here;
+            # completion, leakage, and FAR/FRR are computed independently.
+            broker_fulfilled = (op_pub.op_category == 'C1' or op_pub.op_type == "AUDIT")
+            if metrics.relevant_recv < metrics.relevant_subs and broker_fulfilled:
+
+                # Broker-only fulfilment: treat a broker response as full coverage.
                 if len(op_resp_from_broker) > 0:
-                    
-                    # In this case alone, we treat this as 100% response
+
                     metrics.relevant_subs = len(op_resp_from_broker)
                     metrics.relevant_recv = len(op_resp_from_broker)
 
