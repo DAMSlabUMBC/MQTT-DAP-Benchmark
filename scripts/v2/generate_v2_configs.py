@@ -146,3 +146,76 @@ def connectivity_events(subscriber_ids):
         {"time_ms": RECONNECT_MS, "type": "reconnect", "devices": subset,
          "description": f"Reconnect {len(subset)} subscribers (2/3 of run)"},
     ]
+
+
+def _header(name):
+    return {
+        "node_name": "TestNode",
+        "client_module_name": "ClientInterface",
+        "output_dir": "logs",
+        "reg_by_msg_reg_topic": "$DAP/purpose_management",
+        "reg_by_topic_pub_reg_topic": "$DAP/MP_reg",
+        "reg_by_topic_sub_reg_topic": "$DAP/SP_reg",
+        "or_topic_name": "OR",
+        "ors_topic_name": "ORS",
+        "on_topic_name": "ON",
+        "onp_topic_name": "ONP",
+        "osys_topic_name": "$OSYS",
+        "operational_response_topic_prefix": "op_resp",
+        "operational_purpose": "DAP_OP",
+        "purpose_management_method": 3,
+        "monitor_broker": True,
+        "node_exporter_url": "http://localhost:9100/metrics",
+        "monitor_interval_ms": 1000,
+    }
+
+
+def _ops_block(with_ops):
+    if not with_ops:
+        return {"op_send_rate": 0, "c1_reg_ops": [], "c1_ops": [],
+                "c2_ops": [], "c3_ops": []}
+    return {
+        "op_send_rate": OP_SEND_RATE_MS,
+        "c1_reg_ops": list(prof.C1_REG_OPS),
+        "c1_ops": list(prof.C1_OPS),
+        "c2_ops": list(prof.C2_OPS),
+        "c3_ops": list(prof.C3_OPS),
+    }
+
+
+def assemble_config(set_id, variant, n_purposes, dynamic_side, with_ops, connectivity):
+    name = f"v2_set{set_id}_{variant}_{n_purposes}p_unified"
+
+    pub_defs = build_publisher_definitions()
+    sub_def = build_subscriber_definition()
+    pub_insts = build_publisher_instances(n_purposes)
+    sub_insts = build_subscriber_instances(n_purposes)
+
+    events = []
+    lc = lifecycle_events()
+    events.extend(lc[:2])  # connect_all, start_publishing_all
+
+    if dynamic_side in ("mp", "both"):
+        pub_subset = select_subset([d["instance_id"] for d in pub_insts], label="mp")
+        events.extend(change_purpose_events(pub_subset, n_purposes))
+    if dynamic_side in ("sp", "both"):
+        sub_subset = select_subset([s["instance_id"] for s in sub_insts], label="sp")
+        events.extend(change_purpose_events(sub_subset, n_purposes))
+    if connectivity:
+        events.extend(connectivity_events([s["instance_id"] for s in sub_insts]))
+
+    events.append(lc[2])  # disconnect_all
+    events.sort(key=lambda e: e["time_ms"])
+
+    cfg = _header(name)
+    cfg["device_definitions"] = pub_defs + [sub_def]
+    cfg["purpose_definitions"] = build_purpose_definitions(n_purposes)
+    cfg["test"] = {
+        "name": name,
+        "duration_ms": DURATION_MS,
+        "data_qos": 0,
+        "device_instances": pub_insts + sub_insts,
+        "scheduled_events": events,
+        **_ops_block(with_ops),
+    }
+    return cfg
