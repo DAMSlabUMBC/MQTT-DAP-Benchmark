@@ -96,3 +96,33 @@ have no registered data to act on. Needs investigation before any iii/iv/v sweep
 
 **Next:** Gate OP (confirm a single pinned publisher issues all periodic ops across all ticks),
 then stop and report before any iii/iv/v sweep.
+
+---
+
+## Sets i & ii sweep (one rep each, 2026-06-03, Paladin loopback)
+
+Freshness verified by log timestamps (NOT exit codes): per-device RECV↔PUBLISH join + analyze FAR/FRR.
+
+| Config | span | join (median / min) | FAR | FRR | valid / invalid | msg/s | verdict |
+|---|---|---|---|---|---|---|---|
+| set1_static_1p | **38s** | 100% / 100% | 0 | 0 | 34686 / 0 | 910 | ❌ PARTIAL — rerun |
+| set1_static_10p | 180s | 100% / 100% | 0 | 0 | 147980 / 0 | 822 | ✅ |
+| set1_static_100p | 180s | 100% / 100% | 0 | 0 | 130788 / 0 | 727 | ✅ |
+| set2_dynamic_mp_10p | 180s | 100% / 100% | 0 | 0 | 144288 / 0 | 802 | ✅ |
+| set2_dynamic_sp_10p | 180s | 116.7% / 0% (dev17) | 0 | 0 | 141466 / 2 | 786 | ✅ (churn) |
+| set2_dynamic_both_10p | 180s | 131.4% / 0% (dev17) | 0 | 0.0001 | 213108 / 18 | 1186 | ✅ (churn) |
+| set2_dynamic_mp_100p | 180s | 100% / 100% | 0 | 0 | 142476 / 0 | 792 | ✅ |
+| set2_dynamic_sp_100p | 180s | 100% / 0% (dev20) | 0 | 0.0001 | 126494 / 0 | 703 | ✅ (churn) |
+| set2_dynamic_both_100p | 180s | 139.3% / 0% (dev20) | 0 | 0 | 364239 / 4 | 2027 | ✅ (churn) |
+
+**Verdict:** 8/9 valid full-180s runs. Static (i) 10p/100p and dynamic-MP (ii) are clean
+(join 100%, FAR=FRR=0). Dynamic-SP/both show join>100% (over-delivery: multiple subscribers
+transiently share a churned purpose) and per-device 0% gaps (some purposes momentarily have no
+subscriber) — the expected signature of SP purpose churn, with FAR=0 and FRR≈0.
+
+**set1_static_1p — PARTIAL (rerun needed):** publishing stopped at 38s though the process ran the
+full 180s and exited rc=0 (broker monitor collected 165 samples). Under the 40-publishers→1-subscriber
+fan-in the broker dropped the publishers with a non-zero reason code; `TestExecutor._on_disconnect`
+only handles `reason_code==0`, so it neither logged the drop nor cleared `is_connected` — publishes
+silently failed while the loop kept running. Latent harness gap (out of current scope); rerun the
+1p cell. Confirms why exit codes are not trusted.
