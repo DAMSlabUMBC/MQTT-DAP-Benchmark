@@ -694,8 +694,14 @@ class MetricsCalculator:
 
             # Determine relevant vs irrelevant requests
             
-            # We first need to see every message this client sent on which topics and purposes
-            pubs_by_client = [e for e in self.publish_events if e.client_id == op_pub.client_id]
+            # We first need to see every message this client sent on which topics and purposes.
+            # Bound to data published at or before the op's timestamp: a cumulative op
+            # (OpPFs="*") targets every processor that holds the subject's data *as of now*,
+            # i.e. consumers-so-far. Counting the client's whole-run publishes would inflate
+            # relevant_subs with consumers that only matched a later (post-op) purpose change,
+            # understating coverage for early ops. (Matches the broker's dr forwarding set.)
+            pubs_by_client = [e for e in self.publish_events
+                              if e.client_id == op_pub.client_id and e.timestamp <= op_pub.timestamp]
             
             # Find subscribers that should respond
             relevant_sub_clients = list()
