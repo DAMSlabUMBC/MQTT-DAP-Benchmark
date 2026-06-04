@@ -224,3 +224,35 @@ All 11 cells ran the full **180s** (no truncation); broker survived every run + 
 
 **Sets i–v all have one-rep correctness data.** No stop condition hit. Ready for additional reps /
 the broader run whenever desired.
+
+---
+
+## Dynamic-cell coverage resolved + zero-leakage proof (2026-06-03)
+
+**Worked example (set4_dynamic_mp_10p)** disproved the "current-sub" hypothesis and revealed the
+real, intended behavior: cumulative ops forward to **all consumers-so-far**. Op issuer dev25's MP
+cycles p5→p1→p2→…; each HISTORY op (scoped OpPFs="*") forwarded to exactly the subscribers that had
+consumed dev25's data up to that op's timestamp (corr388→[p5], corr800→[p1,p5], …, corr3730→all 10).
+This is the GDPR data-subject-right semantics the paper claims (an op on "all my data" reaches every
+processor holding any of it, incl. past consumers under prior purposes) — confirmed intended, not a gap.
+
+**Zero-leakage proof (forwarded ⊆ true historical consumers):**
+- mp_10p: all 10 forwarded subs genuinely consumed dev25 data; largest op (corr3730, all 10) — all 10 consumers.
+- mp_100p (decisive): only **18 of 100** subs ever consumed dev25 data; largest op forwarded to **exactly those 18** — never any of the other 82 never-consumers; no sub forwarded before it consumed. **No leakage.**
+
+**Refinement applied:** `relevant_subs` now counts only the issuer's data published at/before the op
+timestamp (consumers-so-far), matching the broker's dr forwarding set. Re-analyzed dynamic cells:
+
+| cell | coverage before → after | completion | leakage | FAR | FRR |
+|---|---|---|---|---|---|
+| set4_dynamic_mp_10p | 0.77 → **1.00** | 1.0 | 0 | 0 | 0.0016 |
+| set4_dynamic_sp_10p | 0.84 → **1.00** | 1.0 | 0 | 0.0001 | 0.0018 |
+| set4_dynamic_both_10p | 0.80 → **1.00** | 1.0 | 0 | 0.0002 | 0.0050 |
+| set4_dynamic_mp_100p | 0.62 → **1.00** | 1.0 | 0 | 0 | 0.0031 |
+| set4_dynamic_both_100p | 0.83 → **1.00** | 1.0 | 0 | 0 | 0.0050 |
+
+Static/connectivity cells were already 1.0 (no purpose churn) and are unaffected. completion, leakage,
+FAR, FRR all unchanged by the refinement (coverage-denominator only).
+
+**Net: all 11 ops cells now read coverage 1.0, completion 100%, leakage 0, FAR ~0, with zero-leakage
+proven for cumulative ops.**
