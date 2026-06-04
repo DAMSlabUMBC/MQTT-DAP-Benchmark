@@ -186,3 +186,41 @@ or a startup-window miss. Neither blocks, but both warrant a look before committ
 **Follow-up logged (not done):** the dead shadowed AUDIT(731)/HISTORY(767) branches in
 handle_publish.c should be removed so those ops use the dr__ paths — larger broker change, deferred
 to Section 6 verification per the scope decision.
+
+---
+
+## Full iii/iv/v sweep (one rep each, 2026-06-03, Paladin loopback)
+
+All 11 cells ran the full **180s** (no truncation); broker survived every run + final teardown
+(Running, Exit 0, 1883 open) — neither stop condition triggered. **Op completion = 100%
+(AUDIT/HISTORY/UPDATE/DELETE/RESTRICT) in every cell.** Coverage refinement (AUDIT) applied.
+
+| Cell | span | join med/min | FAR | FRR | ops completion | coverage |
+|---|---|---|---|---|---|---|
+| set3_static_ops_1p | 180s | 100% / 93%(dev25) | 0 | 0.0031 | all 100% | 1.00 |
+| set3_static_ops_10p | 180s | 100% / 98.8%(dev25) | 0 | 0.0004 | all 100% | 1.00 |
+| set3_static_ops_100p | 180s | 100% / 92.1%(dev25) | 0 | 0.0008 | all 100% | 1.00 |
+| set4_dynamic_mp_10p | 180s | 100% / 96.9%(dev25) | 0 | 0.0016 | all 100% | 0.77 * |
+| set4_dynamic_sp_10p | 180s | 117.5% / 0%(dev17) | 0.0001 | 0.0018 | all 100% | 0.84 * |
+| set4_dynamic_both_10p | 180s | 132.3% / 0%(dev17) | 0.0002 | 0.0050 | all 100% | 0.80 * |
+| set4_dynamic_mp_100p | 180s | 100% / 92.5%(dev25) | 0 | 0.0031 | all 100% | 0.62 * |
+| set4_dynamic_sp_100p | 180s | 100% / 0%(dev20) | 0.0001 | 0.0001 | all 100% | 1.00 |
+| set4_dynamic_both_100p | 180s | 140.1% / 0%(dev20) | 0 | 0.0050 | all 100% | 0.83 * |
+| set5_connectivity_10p | 180s | 100% / 0%(dev17) | 0 | 0.0006 | all 100% | 1.00 |
+| set5_connectivity_100p | 180s | 100% / 50%(dev20) | 0 | 0.0003 | all 100% | 1.00 |
+
+**Interpretation (all explained, no real bugs):**
+- **Ops fully work** across static, dynamic, and connectivity sets — 100% completion everywhere.
+- **FAR ~0** throughout (≤0.0002, the SP-churn boundary race). No misrouting.
+- **FRR 0.0001–0.0050**, small, from three explained sources: dev25 op-issuer QoS-0 contention
+  (static/mp cells), SP-churn re-subscribe boundary (sp/both), and the disconnect window (set5).
+- **join >100%** in sp/both = verified-genuine churn fan-out (subset sharing a purpose); 0%/50%
+  per-device mins = purposes momentarily unsubscribed (sp churn) or subscribers offline 60–120s (set5).
+- **coverage = 0.62–0.84 in starred dynamic cells (*)** is a metric-denominator artifact, NOT a gap:
+  the pinned op issuer dev25 is in the MP/SP churn set, so its data matches many subscribers over the
+  run (inflating `relevant_subs`), while each op correctly forwards to its current-relevant subscriber.
+  Completion is 100% (the real fulfilment signal). Same class as the AUDIT artifact; a per-op-moment
+  `relevant_subs` would read ~1.0 — metric-reporting refinement, not a correctness fix.
+
+**Sets i–v all have one-rep correctness data.** No stop condition hit. Ready for additional reps /
+the broader run whenever desired.
