@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 # Framework Method Enums
 class PurposeManagementMethod(Enum):
     PM_UNIFIED = "Unified"
+    PM_TOPIC_ENCODED = "Topic-Encoded"
 
 class C1RightsMethod(Enum):
     C1_0 = "None"

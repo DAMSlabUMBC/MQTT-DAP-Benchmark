@@ -101,11 +101,13 @@ class ConfigParser():
         if not "purpose_management_method" in data:
             raise Exception("purpose_management_method not found in config")
         
-        # Only the unified DAP method is supported; legacy value 3 is still accepted
         method_int = data["purpose_management_method"]
-        if method_int != 3:
-            raise Exception("Only the unified DAP method is supported (purpose_management_method: 3)")
-        self.the_config.method = PurposeManagementMethod.PM_UNIFIED
+        if method_int == 3:
+            self.the_config.method = PurposeManagementMethod.PM_UNIFIED
+        elif method_int == 1:
+            self.the_config.method = PurposeManagementMethod.PM_TOPIC_ENCODED
+        else:
+            raise Exception("Supported purpose_management_method values: 1 (topic-encoded), 3 (unified DAP)")
 
         if not "reg_by_msg_reg_topic" in data:
             raise Exception("reg_by_msg_reg_topic not found in config (required for the unified method's MP registration)")

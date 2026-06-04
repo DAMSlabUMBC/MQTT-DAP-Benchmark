@@ -16,6 +16,20 @@ services:
         soft: 65536
         hard: 65536
 
+  mosquitto-vanilla:
+    image: eclipse-mosquitto:2
+    container_name: benchmark-mosquitto-vanilla
+    ports:
+      - "1884:1883"
+    networks:
+      - benchmark-net
+    volumes:
+      - ./broker-configs/mosquitto-vanilla.conf:/mosquitto/config/mosquitto.conf
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
   # Benchmark Test Runner
   benchmark-runner:
     build:
