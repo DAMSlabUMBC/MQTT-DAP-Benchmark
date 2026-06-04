@@ -201,7 +201,7 @@ class O1InformedMetrics:
     measured separately from the correlated ops rather than joined to its requests"""
     register_info_requests: int = 0
     informed_notifications: int = 0
-    expected_pairs: int = 0
+    publishers_with_consumers: int = 0
     completion_rate: float = 0.0
 
 
@@ -882,11 +882,23 @@ class MetricsCalculator:
         expected per publisher-subscriber data-flow pair, not by a request join"""
         m = O1InformedMetrics()
         m.register_info_requests = sum(1 for e in self.op_publish_events if e.op_type == "REGISTER-INFO")
-        m.informed_notifications = sum(1 for e in self.op_resp_recv_events if e.op_type == "Informed")
-        pairs = {(e.sending_client_id, e.recv_client_id) for e in self.recv_events}
-        m.expected_pairs = len(pairs)
-        if m.expected_pairs > 0:
-            m.completion_rate = m.informed_notifications / m.expected_pairs
+        # Data subjects = devices that published data. Anchor everything to this set so
+        # broker-originated messages (sender "Broker") that land in the data-RECV stream
+        # don't inflate the denominator.
+        publishers = {e.client_id for e in self.publish_events}
+        # Denominator: data subjects that actually have a processor, i.e. publishers
+        # whose data was received by someone (not pub-sub pair count).
+        consumed_pubs = {e.sending_client_id for e in self.recv_events} & publishers
+        # Numerator: publishers the broker informed. The notification's op_type literal is
+        # "REGISTER-INFO" (the "Informed" name predates the unified vocabulary rename).
+        # Count distinct publishers informed (per data subject), so completion never
+        # exceeds 1 even when a publisher has many consumers.
+        informed_pubs = {e.recv_client_id for e in self.op_resp_recv_events
+                         if e.op_type == "REGISTER-INFO"} & publishers
+        m.publishers_with_consumers = len(consumed_pubs)
+        m.informed_notifications = len(informed_pubs & consumed_pubs)
+        if m.publishers_with_consumers > 0:
+            m.completion_rate = m.informed_notifications / m.publishers_with_consumers
         return m
 
     def calculate_all_metrics(self, log_file_path: str, test_name: str = "test") -> Optional[TestMetrics]:
@@ -1016,8 +1028,8 @@ class MetricsCalculator:
         o1 = metrics.o1_informed
         print(f"\n--- O1 (REGISTER-INFO / Informed) Summary ---")
         print(f"REGISTER-INFO Requests Issued:   {o1.register_info_requests}")
-        print(f"Informed Notifications Received: {o1.informed_notifications}")
-        print(f"Expected (pub-sub data pairs):   {o1.expected_pairs}")
+        print(f"Publishers Informed:             {o1.informed_notifications}")
+        print(f"Publishers With Consumers:       {o1.publishers_with_consumers}")
         print(f"Informed Completion Rate:        {o1.completion_rate:.4f} ({o1.completion_rate*100:.5f}%)")
 
         print(f"\n{'='*80}\n")
@@ -1207,8 +1219,8 @@ class MetricsCalculator:
             # O1 (Right to be Informed): broker-auto-fulfilled, reported separately
             o1 = metrics.o1_informed
             writer.writerow(["O1 Informed", "REGISTER-INFO Requests Issued", f"{o1.register_info_requests}"])
-            writer.writerow(["O1 Informed", "Informed Notifications Received", f"{o1.informed_notifications}"])
-            writer.writerow(["O1 Informed", "Expected Pub-Sub Pairs", f"{o1.expected_pairs}"])
+            writer.writerow(["O1 Informed", "Publishers Informed", f"{o1.informed_notifications}"])
+            writer.writerow(["O1 Informed", "Publishers With Consumers", f"{o1.publishers_with_consumers}"])
             writer.writerow(["O1 Informed", "Informed Completion Rate", f"{o1.completion_rate:.4f}"])
 
         # Per-operation rows go to a sibling CSV with its own column schema
