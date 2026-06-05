@@ -30,6 +30,9 @@ class TestConfiguration:
     
     # === Operation information ===
     op_send_rate: int = 0
+    # Who issues operations each interval: "all_publishers" (default) or
+    # "single_random" (one pinned random publisher). Both scope to own data.
+    op_issuer_mode: str = "all_publishers"
     c1_reg_operations: List[str] = list()
     all_operations: Dict[str, str] = dict()
     
@@ -188,7 +191,10 @@ class ConfigParser():
         # Ops not required, may be empty
         if "op_send_rate" in test_yaml:
             test_config.op_send_rate = test_yaml["op_send_rate"]
-            
+
+        if "op_issuer_mode" in test_yaml:
+            test_config.op_issuer_mode = test_yaml["op_issuer_mode"]
+
         if "c1_reg_ops" in test_yaml:
             for op in test_yaml["c1_reg_ops"]:
                 test_config.c1_reg_operations.append(op)

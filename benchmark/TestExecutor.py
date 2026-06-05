@@ -59,6 +59,12 @@ class TestExecutor():
         self.c1_reg_ops = []
         self.all_operations = {}
 
+        # Single-issuer state (used only when op_issuer_mode == "single_random"):
+        # one publisher is chosen once (seeded, reproducible) and reused for the
+        # whole run. It still scopes each operation to its OWN topic/purpose.
+        self._op_issuer_id = None
+        self._op_issuer_rng = random.Random(1074)
+
         #  Seed the random number generator and write seed to log file
         seed = int(time.time())
         random.seed(time.time())
@@ -326,6 +332,19 @@ class TestExecutor():
             self.publish_lock.release()
             
 
+    def _select_op_issuer(self, publishers):
+        """Return the single pinned op-issuing publisher (seeded, reused).
+
+        Re-selects only if the previously pinned publisher is not in the given
+        (connected) list. `publishers` is assumed to be connected publishers.
+        """
+        by_id = {p.instance_id: p for p in publishers}
+        if self._op_issuer_id is not None and self._op_issuer_id in by_id:
+            return by_id[self._op_issuer_id]
+        chosen = self._op_issuer_rng.choice(sorted(publishers, key=lambda p: p.instance_id))
+        self._op_issuer_id = chosen.instance_id
+        return chosen
+
     def _send_operational_requests_if_ready(self, elapsed_ms: float):
         """Send operational requests from publishers if it's time"""
         if elapsed_ms < self.next_op_time_ms or not self.all_operations:
@@ -336,11 +355,18 @@ class TestExecutor():
 
         if not publishers:
             return
-        
-        # Each connected publisher issues its operations scoped to its OWN data
-        # (its registered topic and purpose), rather than one pinned publisher
-        # issuing wildcard-scoped operations covering everyone's data.
-        for publisher in publishers:
+
+        # Issuer mode selects WHO issues; both modes scope each operation to the
+        # ISSUER's OWN topic/purpose (see _send_operational_request):
+        #   single_random - one pinned random publisher issues (paper "a single publisher");
+        #   all_publishers (default) - every connected publisher issues.
+        mode = getattr(self.current_config, "op_issuer_mode", "all_publishers")
+        if mode == "single_random":
+            issuers = [self._select_op_issuer(publishers)]
+        else:
+            issuers = publishers
+
+        for publisher in issuers:
             for op, op_category in self.all_operations.items():
                 self._send_operational_request(publisher, op, op_category)
 
