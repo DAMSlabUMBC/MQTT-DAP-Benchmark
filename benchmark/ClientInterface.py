@@ -254,7 +254,7 @@ def publish_with_purpose(client: mqtt.Client, method: GlobalDefs.PurposeManageme
     return [(msg_info, topic)]
 
 
-def publish_operation_request(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod, operation: str, correlation_data: int | None = None, qos: int = 0) -> List[Tuple[mqtt.MQTTMessageInfo, str]]:
+def publish_operation_request(client: mqtt.Client, method: GlobalDefs.PurposeManagementMethod, operation: str, correlation_data: int | None = None, qos: int = 0, op_tfs: str = "*", op_pfs: str = "*") -> List[Tuple[mqtt.MQTTMessageInfo, str]]:
     
     # Unified method: operational requests go to the operational system topic.
     topic = GlobalDefs.OSYS_TOPIC
@@ -272,15 +272,17 @@ def publish_operation_request(client: mqtt.Client, method: GlobalDefs.PurposeMan
         return _handle_operation_publish(client, method, topic, GlobalDefs.OP_PURPOSE, properties, qos=qos, payload=f'{client._client_id.decode("utf-8")} Right to Know Data')
     elif operation in ("AUDIT", "HISTORY", "DELETE", "RESTRICT"):
         # Scope the operation with the broker-recognized filters (DAP-OpTFs/DAP-OpPFs);
-        # "*" = MOSQ_DAP_ALLOW_ALL_FILTER. (The broker ignores DAP-OpInfo.)
-        properties.UserProperty = (GlobalDefs.PROPERTY_OP_TFS, "*")
-        properties.UserProperty = (GlobalDefs.PROPERTY_OP_PFS, "*")
+        # op_tfs/op_pfs default to "*" = MOSQ_DAP_ALLOW_ALL_FILTER, or the caller may
+        # pass the issuing publisher's own topic/purpose. (The broker ignores DAP-OpInfo.)
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_TFS, op_tfs)
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_PFS, op_pfs)
         return _handle_operation_publish(client, method, topic, GlobalDefs.OP_PURPOSE, properties, qos=qos)
     elif operation == "UPDATE":
         # Scope the operation with the broker-recognized filters (DAP-OpTFs/DAP-OpPFs);
-        # "*" = MOSQ_DAP_ALLOW_ALL_FILTER. (The broker ignores DAP-OpInfo.)
-        properties.UserProperty = (GlobalDefs.PROPERTY_OP_TFS, "*")
-        properties.UserProperty = (GlobalDefs.PROPERTY_OP_PFS, "*")
+        # op_tfs/op_pfs default to "*" = MOSQ_DAP_ALLOW_ALL_FILTER, or the caller may
+        # pass the issuing publisher's own topic/purpose. (The broker ignores DAP-OpInfo.)
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_TFS, op_tfs)
+        properties.UserProperty = (GlobalDefs.PROPERTY_OP_PFS, op_pfs)
         return _handle_operation_publish(client, method, topic, GlobalDefs.OP_PURPOSE, properties, qos=qos, payload="ReplacementData")
     else:
         return list()

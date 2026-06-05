@@ -59,11 +59,6 @@ class TestExecutor():
         self.c1_reg_ops = []
         self.all_operations = {}
 
-        # Operational requests are issued by a single pinned publisher (seeded),
-        # matching the paper's "a single publisher". Selected once on first use.
-        self._op_issuer_id = None
-        self._op_issuer_rng = random.Random(1074)
-
         #  Seed the random number generator and write seed to log file
         seed = int(time.time())
         random.seed(time.time())
@@ -331,19 +326,6 @@ class TestExecutor():
             self.publish_lock.release()
             
 
-    def _select_op_issuer(self, publishers):
-        """Return the single pinned op-issuing publisher (seeded, reused).
-
-        Re-selects only if the previously pinned publisher is not in the given
-        (connected) list. `publishers` is assumed to be connected publishers.
-        """
-        by_id = {p.instance_id: p for p in publishers}
-        if self._op_issuer_id is not None and self._op_issuer_id in by_id:
-            return by_id[self._op_issuer_id]
-        chosen = self._op_issuer_rng.choice(sorted(publishers, key=lambda p: p.instance_id))
-        self._op_issuer_id = chosen.instance_id
-        return chosen
-
     def _send_operational_requests_if_ready(self, elapsed_ms: float):
         """Send operational requests from publishers if it's time"""
         if elapsed_ms < self.next_op_time_ms or not self.all_operations:
@@ -355,10 +337,12 @@ class TestExecutor():
         if not publishers:
             return
         
-        # All operations are issued by a single pinned publisher (paper: "a single publisher")
-        publisher = self._select_op_issuer(publishers)
-        for op, op_category in self.all_operations.items():
-            self._send_operational_request(publisher, op, op_category)
+        # Each connected publisher issues its operations scoped to its OWN data
+        # (its registered topic and purpose), rather than one pinned publisher
+        # issuing wildcard-scoped operations covering everyone's data.
+        for publisher in publishers:
+            for op, op_category in self.all_operations.items():
+                self._send_operational_request(publisher, op, op_category)
 
         # Schedule next operational request
         if hasattr(self.current_config, 'op_send_rate') and self.current_config.op_send_rate > 0:
@@ -411,7 +395,9 @@ class TestExecutor():
             self.method,
             operation,
             message_counter,
-            qos=self.current_config.qos
+            qos=self.current_config.qos,
+            op_tfs=publisher.device_definition.topic,
+            op_pfs=publisher.current_purpose_filter
         )
 
         now = time.time()
